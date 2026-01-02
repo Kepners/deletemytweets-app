@@ -1,0 +1,907 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Delete My Tweets</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700&display=swap');
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    :root {
+      --magenta: #FF00E6;
+      --cyan: #00FFD1;
+      --purple: #7C3BFF;
+      --dark: #1B0B3B;
+      --darker: #0D0620;
+      --coral: #FF2A6D;
+      --white: #ffffff;
+      --white-60: rgba(255,255,255,0.6);
+      --white-30: rgba(255,255,255,0.3);
+      --white-10: rgba(255,255,255,0.1);
+    }
+
+    html, body {
+      height: 100%;
+      overflow: hidden;
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--darker);
+      color: var(--white);
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Cinematic Background */
+    .bg {
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(ellipse at 50% 0%, rgba(255,0,230,0.25) 0%, transparent 60%),
+        radial-gradient(ellipse at 80% 80%, rgba(124,59,255,0.2) 0%, transparent 50%),
+        radial-gradient(ellipse at 20% 100%, rgba(255,42,109,0.15) 0%, transparent 40%),
+        linear-gradient(180deg, var(--dark) 0%, var(--darker) 100%);
+      z-index: -1;
+    }
+
+    /* Minimal Titlebar */
+    .titlebar {
+      height: 28px;
+      background: transparent;
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      -webkit-app-region: drag;
+      flex-shrink: 0;
+      padding: 0 4px;
+    }
+
+    .titlebar-controls {
+      display: flex;
+      -webkit-app-region: no-drag;
+    }
+
+    .titlebar-btn {
+      width: 40px;
+      height: 28px;
+      border: none;
+      background: transparent;
+      color: var(--white-30);
+      font-size: 9px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .titlebar-btn:hover { color: var(--white); }
+    .titlebar-btn.close:hover { background: var(--coral); color: var(--white); }
+
+    /* App Container */
+    .app {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      padding: 0 24px;
+    }
+
+    /* Hero - BIG and BOLD */
+    .hero {
+      flex-shrink: 0;
+      padding: 20px 0 30px;
+      position: relative;
+    }
+
+    .hero-label {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--cyan);
+      margin-bottom: 8px;
+    }
+
+    .hero-title {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 72px;
+      line-height: 0.85;
+      letter-spacing: -1px;
+      background: linear-gradient(135deg, var(--white) 0%, var(--magenta) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 8px;
+    }
+
+    .hero-subtitle {
+      font-size: 13px;
+      color: var(--white-60);
+      font-weight: 400;
+    }
+
+    .hero-subtitle span {
+      color: var(--cyan);
+      font-weight: 600;
+    }
+
+    /* Profile Chip */
+    .profile-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      background: rgba(255,255,255,0.05);
+      backdrop-filter: blur(20px);
+      border: 1px solid var(--white-10);
+      border-radius: 40px;
+      padding: 6px 16px 6px 6px;
+      margin-top: 20px;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+
+    .profile-chip:hover {
+      background: rgba(255,0,230,0.15);
+      border-color: var(--magenta);
+      box-shadow: 0 0 30px rgba(255,0,230,0.3);
+    }
+
+    .profile-avatar {
+      width: 36px;
+      height: 36px;
+      background: linear-gradient(135deg, var(--magenta), var(--purple));
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 15px;
+    }
+
+    .profile-name {
+      font-weight: 600;
+      font-size: 14px;
+    }
+
+    .profile-dot {
+      width: 8px;
+      height: 8px;
+      background: var(--coral);
+      border-radius: 50%;
+      box-shadow: 0 0 10px var(--coral);
+    }
+
+    .profile-dot.ready {
+      background: var(--cyan);
+      box-shadow: 0 0 10px var(--cyan);
+    }
+
+    /* Tabs - Horizontal with counts */
+    .tabs {
+      display: flex;
+      gap: 24px;
+      padding: 16px 0;
+      border-bottom: 1px solid var(--white-10);
+      flex-shrink: 0;
+    }
+
+    .tab {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--white-30);
+      cursor: pointer;
+      transition: all 0.2s;
+      position: relative;
+      background: none;
+      border: none;
+      padding: 0;
+      display: flex;
+      align-items: baseline;
+      gap: 4px;
+    }
+
+    .tab:hover { color: var(--white-60); }
+
+    .tab.active { color: var(--white); }
+
+    .tab.active::after {
+      content: '';
+      position: absolute;
+      bottom: -17px;
+      left: 0;
+      right: 0;
+      height: 2px;
+      background: var(--magenta);
+      box-shadow: 0 0 10px var(--magenta);
+    }
+
+    .tab-count {
+      font-size: 9px;
+      color: var(--white-30);
+      vertical-align: super;
+    }
+
+    /* Content */
+    .content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px 0;
+    }
+
+    .tab-panel {
+      display: none;
+    }
+
+    .tab-panel.active {
+      display: block;
+    }
+
+    /* Glassmorphic Cards */
+    .glass-card {
+      background: rgba(255,255,255,0.03);
+      backdrop-filter: blur(20px);
+      border: 1px solid var(--white-10);
+      border-radius: 16px;
+      padding: 16px;
+      margin-bottom: 12px;
+    }
+
+    .card-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--white-10);
+    }
+
+    .card-row:last-child { border-bottom: none; }
+    .card-row:first-child { padding-top: 0; }
+
+    .card-label {
+      font-size: 14px;
+      font-weight: 500;
+    }
+
+    /* Toggle - Glowing */
+    .toggle {
+      width: 48px;
+      height: 26px;
+      background: var(--white-10);
+      border-radius: 13px;
+      position: relative;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+
+    .toggle.on {
+      background: linear-gradient(90deg, var(--magenta), var(--purple));
+      box-shadow: 0 0 20px rgba(255,0,230,0.4);
+    }
+
+    .toggle::after {
+      content: '';
+      position: absolute;
+      width: 22px;
+      height: 22px;
+      background: var(--white);
+      border-radius: 50%;
+      top: 2px;
+      left: 2px;
+      transition: all 0.3s;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    }
+
+    .toggle.on::after {
+      left: 24px;
+    }
+
+    /* Select */
+    .select-group {
+      display: flex;
+      gap: 8px;
+      flex: 1;
+    }
+
+    .select-group select {
+      flex: 1;
+      padding: 10px 14px;
+      background: rgba(0,0,0,0.3);
+      border: 1px solid var(--white-10);
+      border-radius: 10px;
+      color: var(--white);
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .select-group select:focus {
+      outline: none;
+      border-color: var(--magenta);
+      box-shadow: 0 0 15px rgba(255,0,230,0.2);
+    }
+
+    select option { background: var(--dark); }
+
+    /* Number Input */
+    .num-input {
+      width: 70px;
+      padding: 8px;
+      background: rgba(0,0,0,0.3);
+      border: 1px solid var(--white-10);
+      border-radius: 8px;
+      color: var(--white);
+      font-size: 15px;
+      font-weight: 700;
+      text-align: center;
+    }
+
+    .num-input:focus {
+      outline: none;
+      border-color: var(--cyan);
+      box-shadow: 0 0 15px rgba(0,255,209,0.2);
+    }
+
+    /* Speed Chips */
+    .speed-row {
+      display: flex;
+      gap: 8px;
+      flex: 1;
+    }
+
+    .speed-chip {
+      flex: 1;
+      padding: 10px;
+      background: var(--white-10);
+      border: none;
+      border-radius: 10px;
+      color: var(--white-60);
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .speed-chip:hover {
+      background: rgba(255,0,230,0.2);
+    }
+
+    .speed-chip.active {
+      background: linear-gradient(135deg, var(--magenta), var(--purple));
+      color: var(--white);
+      box-shadow: 0 0 20px rgba(255,0,230,0.3);
+    }
+
+    /* Progress View */
+    .progress-display {
+      text-align: center;
+      padding: 30px 0;
+    }
+
+    .progress-percent {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 96px;
+      line-height: 1;
+      background: linear-gradient(135deg, var(--cyan), var(--magenta));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .progress-label {
+      font-size: 12px;
+      color: var(--white-30);
+      text-transform: uppercase;
+      letter-spacing: 3px;
+      margin-top: 8px;
+    }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin-top: 24px;
+    }
+
+    .stat-box {
+      background: rgba(255,255,255,0.03);
+      backdrop-filter: blur(10px);
+      border-radius: 12px;
+      padding: 16px;
+      text-align: center;
+    }
+
+    .stat-num {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 36px;
+      line-height: 1;
+    }
+
+    .stat-num.del { color: var(--coral); }
+    .stat-num.prot { color: var(--cyan); }
+    .stat-num.skip { color: var(--white-30); }
+
+    .stat-label {
+      font-size: 10px;
+      color: var(--white-30);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-top: 4px;
+    }
+
+    .log-box {
+      background: rgba(0,0,0,0.3);
+      border-radius: 12px;
+      padding: 12px;
+      margin-top: 20px;
+      max-height: 150px;
+      overflow-y: auto;
+      font-size: 11px;
+      font-family: monospace;
+    }
+
+    .log-line {
+      padding: 6px 0;
+      border-bottom: 1px solid var(--white-10);
+      color: var(--white-60);
+    }
+
+    .log-line:last-child { border-bottom: none; }
+    .log-line.ok { color: var(--cyan); }
+    .log-line.err { color: var(--coral); }
+
+    /* Empty State */
+    .empty {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--white-30);
+    }
+
+    .empty-icon {
+      font-size: 48px;
+      margin-bottom: 16px;
+    }
+
+    /* Floating Bottom Nav - Glassmorphic */
+    .bottom-bar {
+      position: relative;
+      padding: 16px 0 24px;
+      display: flex;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .action-btn {
+      padding: 18px 48px;
+      background: linear-gradient(135deg, var(--magenta), var(--coral));
+      border: none;
+      border-radius: 50px;
+      color: var(--white);
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: all 0.3s;
+      box-shadow:
+        0 10px 40px rgba(255,0,230,0.4),
+        0 0 60px rgba(255,0,230,0.2);
+    }
+
+    .action-btn:hover {
+      transform: translateY(-3px) scale(1.02);
+      box-shadow:
+        0 15px 50px rgba(255,0,230,0.5),
+        0 0 80px rgba(255,0,230,0.3);
+    }
+
+    .action-btn:active {
+      transform: translateY(0) scale(0.98);
+    }
+
+    .action-btn.running {
+      background: var(--white-10);
+      box-shadow: none;
+    }
+
+    .action-btn.stop {
+      background: linear-gradient(135deg, var(--coral), #ff0040);
+      box-shadow: 0 10px 40px rgba(255,42,109,0.4);
+    }
+
+    /* Modal */
+    .modal-bg {
+      position: fixed;
+      inset: 0;
+      background: rgba(13,6,32,0.95);
+      backdrop-filter: blur(20px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+
+    .modal-bg.show { display: flex; }
+
+    .modal-box {
+      background: rgba(255,255,255,0.05);
+      backdrop-filter: blur(30px);
+      border: 1px solid var(--white-10);
+      border-radius: 24px;
+      padding: 32px;
+      width: 90%;
+      max-width: 340px;
+      text-align: center;
+    }
+
+    .modal-title {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 32px;
+      margin-bottom: 20px;
+      color: var(--white);
+    }
+
+    .modal-input {
+      width: 100%;
+      padding: 16px;
+      background: rgba(0,0,0,0.4);
+      border: 1px solid var(--white-10);
+      border-radius: 14px;
+      color: var(--white);
+      font-size: 18px;
+      font-weight: 500;
+      text-align: center;
+      margin-bottom: 20px;
+      transition: all 0.2s;
+    }
+
+    .modal-input:focus {
+      outline: none;
+      border-color: var(--magenta);
+      box-shadow: 0 0 30px rgba(255,0,230,0.3);
+    }
+
+    .modal-input::placeholder { color: var(--white-30); }
+
+    .modal-btns {
+      display: flex;
+      gap: 12px;
+    }
+
+    .modal-btn {
+      flex: 1;
+      padding: 14px;
+      border-radius: 12px;
+      font-weight: 600;
+      font-size: 14px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .modal-btn.cancel {
+      background: var(--white-10);
+      border: none;
+      color: var(--white-60);
+    }
+
+    .modal-btn.cancel:hover {
+      background: var(--white-30);
+    }
+
+    .modal-btn.go {
+      background: linear-gradient(135deg, var(--magenta), var(--purple));
+      border: none;
+      color: var(--white);
+      box-shadow: 0 5px 20px rgba(255,0,230,0.3);
+    }
+
+    .modal-btn.go:hover {
+      box-shadow: 0 8px 30px rgba(255,0,230,0.5);
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 3px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--magenta); border-radius: 2px; }
+
+    /* Section headers */
+    .section-head {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--magenta);
+      margin-bottom: 12px;
+      margin-top: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="bg"></div>
+
+  <div class="titlebar">
+    <div class="titlebar-controls">
+      <button class="titlebar-btn" onclick="minimizeWindow()">─</button>
+      <button class="titlebar-btn" onclick="maximizeWindow()">□</button>
+      <button class="titlebar-btn close" onclick="closeWindow()">✕</button>
+    </div>
+  </div>
+
+  <div class="app">
+    <!-- HERO - Big and Bold -->
+    <div class="hero">
+      <div class="hero-label">Tweet Cleanup Tool</div>
+      <h1 class="hero-title">DELETE<br>MY TWEETS</h1>
+      <p class="hero-subtitle">Clean your <span>X</span> history safely</p>
+
+      <div class="profile-chip" onclick="showModal()">
+        <div class="profile-avatar" id="avatar">?</div>
+        <span class="profile-name" id="handleDisplay">Set Handle</span>
+        <div class="profile-dot" id="statusDot"></div>
+      </div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="tabs">
+      <button class="tab active" data-tab="settings">Settings</button>
+      <button class="tab" data-tab="progress">Progress</button>
+      <button class="tab" data-tab="history">History <span class="tab-count">0</span></button>
+    </div>
+
+    <!-- Content -->
+    <div class="content">
+      <!-- Settings -->
+      <div class="tab-panel active" id="settings">
+        <div class="section-head">What to Delete</div>
+        <div class="glass-card">
+          <div class="card-row">
+            <span class="card-label">Posts</span>
+            <div class="toggle on" data-setting="posts"></div>
+          </div>
+          <div class="card-row">
+            <span class="card-label">Replies</span>
+            <div class="toggle on" data-setting="replies"></div>
+          </div>
+          <div class="card-row">
+            <span class="card-label">Reposts</span>
+            <div class="toggle" data-setting="reposts"></div>
+          </div>
+        </div>
+
+        <div class="section-head">Date Range</div>
+        <div class="glass-card">
+          <div class="card-row">
+            <span class="card-label" style="color:var(--coral)">🗑 Delete Before</span>
+            <div class="select-group">
+              <select id="deleteMonth"></select>
+              <select id="deleteYear"></select>
+            </div>
+          </div>
+          <div class="card-row">
+            <span class="card-label" style="color:var(--cyan)">🛡 Protect After</span>
+            <div class="select-group">
+              <select id="protectMonth"></select>
+              <select id="protectYear"></select>
+            </div>
+          </div>
+        </div>
+
+        <div class="section-head">Options</div>
+        <div class="glass-card">
+          <div class="card-row">
+            <span class="card-label">Target tweets</span>
+            <input type="number" class="num-input" id="target" value="200">
+          </div>
+          <div class="card-row">
+            <span class="card-label">Speed</span>
+            <div class="speed-row">
+              <button class="speed-chip" data-speed="aggressive">⚡ Fast</button>
+              <button class="speed-chip active" data-speed="normal">Normal</button>
+              <button class="speed-chip" data-speed="conservative">🐢 Safe</button>
+            </div>
+          </div>
+          <div class="card-row">
+            <span class="card-label">Show browser</span>
+            <div class="toggle on" data-setting="showBrowser"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Progress -->
+      <div class="tab-panel" id="progress">
+        <div class="progress-display">
+          <div class="progress-percent" id="progressNum">0%</div>
+          <div class="progress-label">Complete</div>
+        </div>
+
+        <div class="stats-grid">
+          <div class="stat-box">
+            <div class="stat-num del" id="delCount">0</div>
+            <div class="stat-label">Deleted</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-num prot" id="protCount">0</div>
+            <div class="stat-label">Protected</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-num skip" id="skipCount">0</div>
+            <div class="stat-label">Skipped</div>
+          </div>
+        </div>
+
+        <div class="log-box" id="logBox">
+          <div class="log-line">Waiting to start...</div>
+        </div>
+      </div>
+
+      <!-- History -->
+      <div class="tab-panel" id="history">
+        <div class="empty">
+          <div class="empty-icon">📋</div>
+          <p>No cleanup history yet</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bottom Action -->
+    <div class="bottom-bar">
+      <button class="action-btn" id="actionBtn" onclick="startCleanup()">
+        Start Cleanup
+      </button>
+    </div>
+  </div>
+
+  <!-- Modal -->
+  <div class="modal-bg" id="modal">
+    <div class="modal-box">
+      <h2 class="modal-title">Your Handle</h2>
+      <input type="text" class="modal-input" id="handleInput" placeholder="@username">
+      <div class="modal-btns">
+        <button class="modal-btn cancel" onclick="hideModal()">Cancel</button>
+        <button class="modal-btn go" onclick="saveHandle()">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const { ipcRenderer } = require('electron');
+
+    function minimizeWindow() { ipcRenderer.send('minimize'); }
+    function maximizeWindow() { ipcRenderer.send('maximize'); }
+    function closeWindow() { ipcRenderer.send('close'); }
+
+    let config = {
+      handle: '', posts: true, replies: true, reposts: false,
+      speed: 'normal', headless: false, target: 200,
+      deleteMonth: 12, deleteYear: 2014,
+      protectMonth: 1, protectYear: new Date().getFullYear()
+    };
+    let isRunning = false;
+
+    // Tabs
+    document.querySelectorAll('.tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+        tab.classList.add('active');
+        document.getElementById(tab.dataset.tab).classList.add('active');
+      });
+    });
+
+    // Toggles
+    document.querySelectorAll('.toggle').forEach(t => {
+      t.addEventListener('click', () => {
+        t.classList.toggle('on');
+        const s = t.dataset.setting;
+        if (s === 'posts') config.posts = t.classList.contains('on');
+        if (s === 'replies') config.replies = t.classList.contains('on');
+        if (s === 'reposts') config.reposts = t.classList.contains('on');
+        if (s === 'showBrowser') config.headless = !t.classList.contains('on');
+      });
+    });
+
+    // Speed
+    document.querySelectorAll('.speed-chip').forEach(c => {
+      c.addEventListener('click', () => {
+        document.querySelectorAll('.speed-chip').forEach(x => x.classList.remove('active'));
+        c.classList.add('active');
+        config.speed = c.dataset.speed;
+      });
+    });
+
+    // Selects
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const yr = new Date().getFullYear();
+    ['deleteMonth','protectMonth'].forEach(id => {
+      const s = document.getElementById(id);
+      months.forEach((m,i) => s.innerHTML += `<option value="${i+1}">${m}</option>`);
+    });
+    ['deleteYear','protectYear'].forEach(id => {
+      const s = document.getElementById(id);
+      for (let y = 2006; y <= yr; y++) s.innerHTML += `<option value="${y}">${y}</option>`;
+    });
+    document.getElementById('deleteMonth').value = 12;
+    document.getElementById('deleteYear').value = 2014;
+    document.getElementById('protectMonth').value = 1;
+    document.getElementById('protectYear').value = yr;
+
+    // Modal
+    function showModal() {
+      document.getElementById('modal').classList.add('show');
+      document.getElementById('handleInput').focus();
+    }
+    function hideModal() {
+      document.getElementById('modal').classList.remove('show');
+    }
+    function saveHandle() {
+      let h = document.getElementById('handleInput').value.trim().replace(/^@/,'');
+      if (h) {
+        config.handle = h;
+        document.getElementById('handleDisplay').textContent = '@' + h;
+        document.getElementById('avatar').textContent = h[0].toUpperCase();
+        document.getElementById('statusDot').classList.add('ready');
+      }
+      hideModal();
+    }
+    document.getElementById('handleInput').addEventListener('keypress', e => {
+      if (e.key === 'Enter') saveHandle();
+    });
+
+    // Start
+    function startCleanup() {
+      if (!config.handle) { showModal(); return; }
+      if (isRunning) { ipcRenderer.send('stop-cleanup'); return; }
+
+      config.target = parseInt(document.getElementById('target').value) || 200;
+      config.deleteMonth = parseInt(document.getElementById('deleteMonth').value);
+      config.deleteYear = parseInt(document.getElementById('deleteYear').value);
+      config.protectMonth = parseInt(document.getElementById('protectMonth').value);
+      config.protectYear = parseInt(document.getElementById('protectYear').value);
+
+      document.querySelector('[data-tab="progress"]').click();
+      isRunning = true;
+      const btn = document.getElementById('actionBtn');
+      btn.classList.add('running','stop');
+      btn.textContent = 'Stop';
+      ipcRenderer.send('start-cleanup', config);
+    }
+
+    // IPC
+    ipcRenderer.on('cleanup-progress', (e, d) => {
+      const pct = Math.round((d.scanned / d.target) * 100);
+      document.getElementById('progressNum').textContent = pct + '%';
+      document.getElementById('delCount').textContent = d.deleted;
+      document.getElementById('protCount').textContent = d.protected;
+      document.getElementById('skipCount').textContent = d.skipped;
+    });
+
+    ipcRenderer.on('cleanup-log', (e, d) => {
+      const log = document.getElementById('logBox');
+      const cls = d.type === 'success' ? 'ok' : d.type === 'error' ? 'err' : '';
+      log.innerHTML += `<div class="log-line ${cls}">${d.message}</div>`;
+      log.scrollTop = log.scrollHeight;
+    });
+
+    ipcRenderer.on('cleanup-complete', () => {
+      isRunning = false;
+      const btn = document.getElementById('actionBtn');
+      btn.classList.remove('running','stop');
+      btn.textContent = 'Start Cleanup';
+    });
+
+    ipcRenderer.on('load-config', (e, c) => {
+      if (c && c.handle) {
+        config.handle = c.handle;
+        document.getElementById('handleDisplay').textContent = '@' + c.handle;
+        document.getElementById('avatar').textContent = c.handle[0].toUpperCase();
+        document.getElementById('statusDot').classList.add('ready');
+      }
+    });
+
+    ipcRenderer.send('get-config');
+  </script>
+</body>
+</html>

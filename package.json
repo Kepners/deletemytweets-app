@@ -1,0 +1,81 @@
+{
+  "name": "deletemytweets",
+  "version": "1.1.0",
+  "description": "Date-filtered tweet deletion tool for X (Twitter). Safely delete old tweets while protecting recent ones.",
+  "main": "electron-main.js",
+  "bin": {
+    "deletemytweets": "index.js"
+  },
+  "scripts": {
+    "start": ".\\node_modules\\electron\\dist\\electron.exe electron-main.js",
+    "cli": "node index.js",
+    "cleanup": "node index.js",
+    "build": "set CSC_IDENTITY_AUTO_DISCOVERY=false && electron-builder --win",
+    "build:cli": "pkg . --targets node18-win-x64 --output DeleteMyTweets.exe"
+  },
+  "pkg": {
+    "assets": [],
+    "outputPath": "dist"
+  },
+  "keywords": [
+    "twitter",
+    "x",
+    "cleanup",
+    "delete-tweets",
+    "tweet-deletion",
+    "automation",
+    "playwright"
+  ],
+  "author": "Kepners",
+  "license": "MIT",
+  "dependencies": {
+    "better-sqlite3": "^12.5.0",
+    "boxen": "^5.1.2",
+    "chalk": "^4.1.2",
+    "cli-progress": "^3.12.0",
+    "figlet": "^1.7.0",
+    "gradient-string": "^2.0.2",
+    "ora": "^5.4.1",
+    "playwright": "^1.40.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Kepners/deletemytweets.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Kepners/deletemytweets/issues"
+  },
+  "homepage": "https://github.com/Kepners/deletemytweets#readme",
+  "devDependencies": {
+    "electron": "^28.3.3",
+    "electron-builder": "^24.9.1",
+    "pkg": "^5.8.1",
+    "png-to-ico": "^3.0.1",
+    "sharp": "^0.34.5"
+  },
+  "build": {
+    "appId": "com.kepners.deletemytweets",
+    "productName": "Delete My Tweets",
+    "win": {
+      "target": [
+        "portable",
+        "nsis"
+      ],
+      "icon": "icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "files": [
+      "electron-main.js",
+      "app.html",
+      "index.js",
+      "package.json",
+      "icon.ico"
+    ]
+  }
+}
