@@ -139,7 +139,6 @@
       border: 1px solid var(--white-10);
       border-radius: 40px;
       padding: 4px 12px 4px 4px;
-      margin-top: 12px;
       cursor: pointer;
       transition: all 0.3s;
     }
@@ -178,6 +177,199 @@
     .profile-dot.ready {
       background: var(--cyan);
       box-shadow: 0 0 10px var(--cyan);
+    }
+
+    /* Profile Row - Account + Login */
+    .profile-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-top: 12px;
+    }
+
+    .login-btn {
+      padding: 8px 16px;
+      background: var(--cyan);
+      border: none;
+      border-radius: 20px;
+      color: var(--dark);
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      box-shadow: 0 0 20px rgba(0,255,209,0.4);
+      transition: all 0.3s;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .login-btn:hover {
+      transform: scale(1.05);
+      box-shadow: 0 0 30px rgba(0,255,209,0.6);
+    }
+
+    .login-btn.logout {
+      background: var(--coral);
+      box-shadow: 0 0 20px rgba(255,42,109,0.4);
+      color: var(--white);
+    }
+
+    .login-btn.logout:hover {
+      box-shadow: 0 0 30px rgba(255,42,109,0.6);
+    }
+
+    .login-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    /* Account Switcher */
+    .account-switcher {
+      margin-top: 12px;
+      background: rgba(255,255,255,0.03);
+      backdrop-filter: blur(20px);
+      border: 1px solid var(--white-10);
+      border-radius: 12px;
+      padding: 8px;
+      max-height: 120px;
+    }
+
+    .account-switcher-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 6px;
+    }
+
+    .account-switcher-label {
+      font-size: 9px;
+      font-weight: 600;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: var(--white-30);
+      padding-left: 4px;
+    }
+
+    .add-account-btn {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      border: 1px solid var(--white-30);
+      background: transparent;
+      color: var(--white-30);
+      font-size: 16px;
+      font-weight: 300;
+      line-height: 1;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .add-account-btn:hover {
+      border-color: var(--cyan);
+      color: var(--cyan);
+      box-shadow: 0 0 10px rgba(0,255,209,0.3);
+    }
+
+    .account-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 8px;
+      max-height: 50px;
+      overflow-y: auto;
+    }
+
+    .account-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid var(--white-10);
+      border-radius: 20px;
+      color: var(--white-60);
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .account-btn:hover {
+      background: rgba(255,0,230,0.15);
+      border-color: var(--magenta);
+      color: var(--white);
+    }
+
+    .account-btn.active {
+      background: linear-gradient(135deg, var(--magenta), var(--purple));
+      border-color: transparent;
+      color: var(--white);
+      font-weight: 600;
+      box-shadow: 0 0 15px rgba(255,0,230,0.3);
+    }
+
+    .account-btn .account-stat {
+      font-size: 10px;
+      color: var(--coral);
+      font-weight: 600;
+    }
+
+    .account-btn.active .account-stat {
+      color: var(--white);
+      opacity: 0.8;
+    }
+
+    .account-btn .remove-btn {
+      margin-left: 4px;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      border: none;
+      background: rgba(255,42,109,0.3);
+      color: var(--coral);
+      font-size: 10px;
+      line-height: 1;
+      cursor: pointer;
+      opacity: 0;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .account-btn:hover .remove-btn {
+      opacity: 1;
+    }
+
+    .account-btn .remove-btn:hover {
+      background: var(--coral);
+      color: white;
+    }
+
+    .no-accounts {
+      color: var(--white-30);
+      font-size: 11px;
+      padding: 4px 8px;
+    }
+
+    .account-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding-top: 8px;
+      border-top: 1px solid var(--white-10);
+    }
+
+    .account-row .card-label {
+      font-size: 11px;
+      color: var(--white-60);
+    }
+
+    .account-row .toggle {
+      transform: scale(0.85);
     }
 
     /* Tabs - Horizontal with counts */
@@ -377,15 +569,15 @@
       box-shadow: 0 0 20px rgba(255,0,230,0.3);
     }
 
-    /* Progress View */
+    /* Progress View - Compact */
     .progress-display {
       text-align: center;
-      padding: 30px 0;
+      padding: 12px 0;
     }
 
     .progress-percent {
       font-family: 'Bebas Neue', sans-serif;
-      font-size: 96px;
+      font-size: 72px;
       line-height: 1;
       background: linear-gradient(135deg, var(--cyan), var(--magenta));
       -webkit-background-clip: text;
@@ -393,31 +585,31 @@
     }
 
     .progress-label {
-      font-size: 12px;
+      font-size: 11px;
       color: var(--white-30);
       text-transform: uppercase;
-      letter-spacing: 3px;
-      margin-top: 8px;
+      letter-spacing: 2px;
+      margin-top: 4px;
     }
 
     .stats-grid {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
-      gap: 12px;
-      margin-top: 24px;
+      gap: 8px;
+      margin-top: 8px;
     }
 
     .stat-box {
       background: rgba(255,255,255,0.03);
       backdrop-filter: blur(10px);
-      border-radius: 12px;
-      padding: 16px;
+      border-radius: 10px;
+      padding: 10px;
       text-align: center;
     }
 
     .stat-num {
       font-family: 'Bebas Neue', sans-serif;
-      font-size: 36px;
+      font-size: 28px;
       line-height: 1;
     }
 
@@ -426,26 +618,26 @@
     .stat-num.skip { color: var(--white-30); }
 
     .stat-label {
-      font-size: 10px;
+      font-size: 9px;
       color: var(--white-30);
       text-transform: uppercase;
       letter-spacing: 1px;
-      margin-top: 4px;
+      margin-top: 2px;
     }
 
     .log-box {
       background: rgba(0,0,0,0.3);
-      border-radius: 12px;
-      padding: 12px;
-      margin-top: 20px;
-      max-height: 150px;
+      border-radius: 10px;
+      padding: 8px;
+      margin-top: 8px;
+      max-height: 100px;
       overflow-y: auto;
-      font-size: 11px;
+      font-size: 10px;
       font-family: monospace;
     }
 
     .log-line {
-      padding: 6px 0;
+      padding: 4px 0;
       border-bottom: 1px solid var(--white-10);
       color: var(--white-60);
     }
@@ -621,10 +813,10 @@
 
     /* Target chips */
     .target-chip {
-      padding: 6px 10px;
+      padding: 4px 8px;
       background: var(--white-10);
-      border-radius: 16px;
-      font-size: 11px;
+      border-radius: 12px;
+      font-size: 10px;
       font-weight: 600;
       transition: all 0.3s;
     }
@@ -632,7 +824,7 @@
     .target-chip.active {
       opacity: 1 !important;
       background: linear-gradient(135deg, var(--magenta), var(--purple));
-      box-shadow: 0 0 20px rgba(255,0,230,0.3);
+      box-shadow: 0 0 15px rgba(255,0,230,0.3);
     }
   </style>
 </head>
@@ -654,10 +846,28 @@
       <h1 class="hero-title">DELETE<br>MY TWEETS</h1>
       <p class="hero-subtitle">Clean your <span>X</span> history safely</p>
 
-      <div class="profile-chip" onclick="showModal()">
-        <div class="profile-avatar" id="avatar">?</div>
-        <span class="profile-name" id="handleDisplay">Set Handle</span>
-        <div class="profile-dot" id="statusDot"></div>
+      <div class="profile-row">
+        <div class="profile-chip" onclick="showModal()">
+          <div class="profile-avatar" id="avatar">?</div>
+          <span class="profile-name" id="handleDisplay">Set Handle</span>
+          <div class="profile-dot" id="statusDot"></div>
+        </div>
+        <button id="sessionBtn" onclick="handleSessionAction()" class="login-btn">Login</button>
+      </div>
+
+      <!-- Account Switcher -->
+      <div class="account-switcher" id="accountSwitcher">
+        <div class="account-switcher-header">
+          <div class="account-switcher-label">Switch Account</div>
+          <button class="add-account-btn" onclick="showModal()" title="Add new account">+</button>
+        </div>
+        <div class="account-list" id="accountList">
+          <div class="no-accounts">No saved accounts</div>
+        </div>
+        <div class="account-row private-row">
+          <span class="card-label">Private browser</span>
+          <div class="toggle" data-setting="privateMode"></div>
+        </div>
       </div>
     </div>
 
@@ -726,22 +936,49 @@
           </div>
         </div>
 
-        <div class="section-head" style="margin-top: 10px;">Session</div>
-        <div class="glass-card">
+        <div class="section-head">License</div>
+        <div class="glass-card" id="licenseCard">
           <div class="card-row">
-            <span class="card-label" id="sessionLabel">X Account</span>
-            <button id="sessionBtn" onclick="handleSessionAction()" style="padding: 6px 14px; background: var(--cyan); border: none; border-radius: 8px; color: var(--dark); font-size: 11px; font-weight: 600; cursor: pointer; box-shadow: 0 0 15px var(--cyan);">Login</button>
+            <span class="card-label">Status</span>
+            <span id="licenseStatus" style="font-weight: 700; color: var(--cyan);">Active ✓</span>
           </div>
           <div class="card-row">
-            <span class="card-label">Use private browser</span>
-            <div class="toggle" data-setting="privateMode"></div>
+            <span class="card-label">Key</span>
+            <span id="licenseKeyDisplay" style="font-family: monospace; font-size: 11px; color: var(--white-60);">DMT-****-****-****-****</span>
+          </div>
+          <div class="card-row" style="border: none;">
+            <span style="font-size: 10px; color: var(--white-30); line-height: 1.4;">
+              Personal use on up to 2 devices.<br>Lifetime access to all updates.
+            </span>
+          </div>
+          <div style="display: flex; gap: 8px; margin-top: 8px;">
+            <button onclick="showLicenseModal()" style="
+              flex: 1;
+              padding: 10px;
+              background: var(--white-10);
+              border: 1px solid var(--white-10);
+              border-radius: 8px;
+              color: var(--white-60);
+              font-size: 11px;
+              font-weight: 600;
+              cursor: pointer;
+              transition: all 0.2s;
+            ">Change Key</button>
+            <button onclick="deactivateLicense()" style="
+              flex: 1;
+              padding: 10px;
+              background: rgba(255,42,109,0.15);
+              border: 1px solid var(--coral);
+              border-radius: 8px;
+              color: var(--coral);
+              font-size: 11px;
+              font-weight: 600;
+              cursor: pointer;
+              transition: all 0.2s;
+            ">Deactivate</button>
           </div>
         </div>
 
-        <div class="section-head" style="margin-top: 10px;">All Accounts</div>
-        <div class="glass-card" id="allAccountsList" style="max-height: 80px; overflow-y: auto;">
-          <div style="text-align: center; color: var(--white-30); padding: 8px; font-size: 11px;">No accounts yet</div>
-        </div>
       </div>
 
       <!-- Progress -->
@@ -754,8 +991,8 @@
 
         <!-- Active Targets -->
         <div class="section-head">Targeting</div>
-        <div class="glass-card" style="padding: 12px;">
-          <div style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;">
+        <div class="glass-card" style="padding: 8px;">
+          <div style="display: flex; gap: 8px; justify-content: center; flex-wrap: wrap;">
             <span class="target-chip" id="targetPosts" style="opacity: 0.3;">📝 Posts</span>
             <span class="target-chip" id="targetReplies" style="opacity: 0.3;">💬 Replies</span>
             <span class="target-chip" id="targetReposts" style="opacity: 0.3;">🔄 Reposts</span>
@@ -763,7 +1000,7 @@
         </div>
 
         <!-- Counts Grid -->
-        <div class="stats-grid" style="margin-top: 12px;">
+        <div class="stats-grid">
           <div class="stat-box">
             <div class="stat-num del" id="delCount">0</div>
             <div class="stat-label">Deleted</div>
@@ -779,22 +1016,22 @@
         </div>
 
         <!-- Time & Rate -->
-        <div class="glass-card" style="margin-top: 12px; display: flex; justify-content: space-around; padding: 14px;">
+        <div class="glass-card" style="margin-top: 8px; display: flex; justify-content: space-around; padding: 10px;">
           <div style="text-align: center;">
-            <div style="font-family: 'Bebas Neue'; font-size: 24px; color: var(--cyan);" id="timeElapsed">0:00</div>
-            <div style="font-size: 9px; color: var(--white-30); text-transform: uppercase;">Elapsed</div>
+            <div style="font-family: 'Bebas Neue'; font-size: 20px; color: var(--cyan);" id="timeElapsed">0:00</div>
+            <div style="font-size: 8px; color: var(--white-30); text-transform: uppercase;">Elapsed</div>
           </div>
           <div style="text-align: center;">
-            <div style="font-family: 'Bebas Neue'; font-size: 24px; color: var(--magenta);" id="deleteRate">0</div>
-            <div style="font-size: 9px; color: var(--white-30); text-transform: uppercase;">Per Min</div>
+            <div style="font-family: 'Bebas Neue'; font-size: 20px; color: var(--magenta);" id="deleteRate">0</div>
+            <div style="font-size: 8px; color: var(--white-30); text-transform: uppercase;">Per Min</div>
           </div>
           <div style="text-align: center;">
-            <div style="font-family: 'Bebas Neue'; font-size: 24px; color: var(--white-60);" id="scannedCount">0</div>
-            <div style="font-size: 9px; color: var(--white-30); text-transform: uppercase;">Scanned</div>
+            <div style="font-family: 'Bebas Neue'; font-size: 20px; color: var(--white-60);" id="scannedCount">0</div>
+            <div style="font-size: 8px; color: var(--white-30); text-transform: uppercase;">Scanned</div>
           </div>
         </div>
 
-        <div class="log-box" id="logBox" style="margin-top: 12px;">
+        <div class="log-box" id="logBox">
           <div class="log-line">Waiting to start...</div>
         </div>
       </div>
@@ -840,7 +1077,7 @@
     </div>
   </div>
 
-  <!-- Modal -->
+  <!-- Handle Modal -->
   <div class="modal-bg" id="modal">
     <div class="modal-box">
       <h2 class="modal-title">Your Handle</h2>
@@ -849,6 +1086,25 @@
         <button class="modal-btn cancel" onclick="hideModal()">Cancel</button>
         <button class="modal-btn go" onclick="saveHandle()">Save</button>
       </div>
+    </div>
+  </div>
+
+  <!-- License Modal -->
+  <div class="modal-bg" id="licenseModal">
+    <div class="modal-box" style="max-width: 380px;">
+      <h2 class="modal-title">Enter License Key</h2>
+      <p style="font-size: 12px; color: var(--white-60); text-align: center; margin-bottom: 16px;">
+        Check your email for your license key after purchase
+      </p>
+      <input type="text" class="modal-input" id="licenseInput" placeholder="DMT-XXXX-XXXX-XXXX-XXXX" style="font-family: monospace; letter-spacing: 1px;">
+      <div id="licenseError" style="color: var(--coral); font-size: 12px; text-align: center; margin: -12px 0 16px; display: none;"></div>
+      <div class="modal-btns">
+        <button class="modal-btn cancel" onclick="openPurchaseLink()">Buy License</button>
+        <button class="modal-btn go" onclick="activateLicense()">Activate</button>
+      </div>
+      <p style="font-size: 10px; color: var(--white-30); text-align: center; margin-top: 16px;">
+        Lost your key? <a href="#" onclick="openSupportLink(); return false;" style="color: var(--cyan);">Contact support</a>
+      </p>
     </div>
   </div>
 
@@ -868,6 +1124,158 @@
       privateMode: false  // Use private/fresh browser instead of Edge profile
     };
     let isRunning = false;
+    let hasValidLicense = false;
+
+    // ═══════════════════════════════════════════════════════
+    // LICENSE KEY MANAGEMENT
+    // ═══════════════════════════════════════════════════════
+
+    function formatLicenseInput(input) {
+      // Remove everything except alphanumeric
+      let clean = input.toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+      // Remove DMT prefix if user typed it (we'll add it back)
+      if (clean.startsWith('DMT')) {
+        clean = clean.substring(3);
+      }
+
+      // Split into 4-char groups (max 4 groups)
+      const parts = clean.match(/.{1,4}/g) || [];
+      const limited = parts.slice(0, 4);
+
+      return 'DMT-' + limited.join('-');
+    }
+
+    function maskLicenseKey(key) {
+      if (!key || key.length < 23) return 'DMT-****-****-****-****';
+      // Show: DMT-XXXX-****-****-XXXX
+      return key.slice(0, 9) + '-****-****-' + key.slice(-4);
+    }
+
+    function showLicenseModal() {
+      document.getElementById('licenseModal').classList.add('show');
+      document.getElementById('licenseInput').value = '';
+      document.getElementById('licenseError').style.display = 'none';
+      document.getElementById('licenseInput').focus();
+    }
+
+    function hideLicenseModal() {
+      document.getElementById('licenseModal').classList.remove('show');
+    }
+
+    function openPurchaseLink() {
+      ipcRenderer.send('open-external', 'https://deletemytweets.app/pricing');
+    }
+
+    function openSupportLink() {
+      ipcRenderer.send('open-external', 'mailto:support@deletemytweets.app?subject=Lost%20License%20Key');
+    }
+
+    function activateLicense() {
+      const input = document.getElementById('licenseInput').value.trim();
+      const errorEl = document.getElementById('licenseError');
+
+      if (!input) {
+        errorEl.textContent = 'Please enter a license key';
+        errorEl.style.display = 'block';
+        return;
+      }
+
+      // Format the input
+      const formatted = formatLicenseInput(input);
+
+      // Basic client-side validation
+      if (formatted.length !== 23) {
+        errorEl.textContent = 'License key is incomplete. Format: DMT-XXXX-XXXX-XXXX-XXXX';
+        errorEl.style.display = 'block';
+        return;
+      }
+
+      errorEl.style.display = 'none';
+      ipcRenderer.send('activate-license', formatted);
+    }
+
+    function deactivateLicense() {
+      if (confirm('Deactivate your license? You will need to enter a license key to use the app again.')) {
+        ipcRenderer.send('deactivate-license');
+      }
+    }
+
+    function updateLicenseDisplay(license) {
+      const statusEl = document.getElementById('licenseStatus');
+      const keyEl = document.getElementById('licenseKeyDisplay');
+
+      if (license && license.licenseKey) {
+        hasValidLicense = true;
+        statusEl.textContent = 'Active ✓';
+        statusEl.style.color = 'var(--cyan)';
+        keyEl.textContent = maskLicenseKey(license.licenseKey);
+        enableAppUI();
+      } else {
+        hasValidLicense = false;
+        statusEl.textContent = 'Not Active';
+        statusEl.style.color = 'var(--coral)';
+        keyEl.textContent = 'No license';
+      }
+    }
+
+    function enableAppUI() {
+      document.querySelector('.app').style.opacity = '1';
+      document.querySelector('.app').style.pointerEvents = 'auto';
+    }
+
+    function disableAppUI() {
+      document.querySelector('.app').style.opacity = '0.3';
+      document.querySelector('.app').style.pointerEvents = 'none';
+    }
+
+    // License input auto-formatting
+    document.addEventListener('DOMContentLoaded', () => {
+      const licenseInput = document.getElementById('licenseInput');
+      if (licenseInput) {
+        licenseInput.addEventListener('input', (e) => {
+          const cursorPos = e.target.selectionStart;
+          const oldLen = e.target.value.length;
+          e.target.value = formatLicenseInput(e.target.value);
+          const newLen = e.target.value.length;
+          // Adjust cursor position
+          e.target.setSelectionRange(cursorPos + (newLen - oldLen), cursorPos + (newLen - oldLen));
+        });
+
+        licenseInput.addEventListener('keypress', (e) => {
+          if (e.key === 'Enter') activateLicense();
+        });
+      }
+    });
+
+    // Handle license status from main process
+    ipcRenderer.on('license-status', (event, license) => {
+      updateLicenseDisplay(license);
+      if (!license || !license.licenseKey) {
+        // No valid license - show modal and disable app
+        showLicenseModal();
+        disableAppUI();
+      } else {
+        hideLicenseModal();
+        enableAppUI();
+      }
+    });
+
+    // Handle license activation result
+    ipcRenderer.on('license-result', (event, result) => {
+      if (result.success) {
+        hideLicenseModal();
+        updateLicenseDisplay(result.license);
+        showNotification('License activated! Enjoy Delete My Tweets', 'success');
+      } else {
+        const errorEl = document.getElementById('licenseError');
+        errorEl.textContent = result.error || 'Invalid license key';
+        errorEl.style.display = 'block';
+      }
+    });
+
+    // Check license on app load
+    ipcRenderer.send('get-license');
 
     // ═══════════════════════════════════════════════════════
     // DELETION STATS TRACKING (per account)
@@ -936,6 +1344,12 @@
       document.getElementById('totalHour').textContent = stats.lastHour;
       document.getElementById('totalMinute').textContent = stats.lastMinute;
 
+      // Update History tab count
+      const tabCount = document.querySelector('.tab[data-tab="history"] .tab-count');
+      if (tabCount) {
+        tabCount.textContent = stats.sessions.length > 0 ? stats.sessions.length : '';
+      }
+
       // Update session list
       const sessionList = document.getElementById('sessionList');
       if (stats.sessions.length === 0) {
@@ -976,33 +1390,63 @@
 
     function updateAllAccountsList() {
       const accounts = getAllAccounts();
-      const listEl = document.getElementById('allAccountsList');
+      const listEl = document.getElementById('accountList');
+      const switcherEl = document.getElementById('accountSwitcher');
 
       if (accounts.length === 0) {
-        listEl.innerHTML = '<div style="text-align: center; color: var(--white-30); padding: 12px; font-size: 12px;">No accounts yet</div>';
+        listEl.innerHTML = '<div class="no-accounts">No saved accounts</div>';
+        // Hide switcher if no accounts and no current handle
+        if (!config.handle) {
+          switcherEl.style.display = 'none';
+        } else {
+          switcherEl.style.display = 'block';
+        }
         return;
       }
 
+      switcherEl.style.display = 'block';
       listEl.innerHTML = accounts.map(acc => {
-        const isActive = acc.handle.toLowerCase() === config.handle.toLowerCase();
-        return `<div class="card-row" style="cursor: pointer;${isActive ? 'background:var(--white-10);border-radius:8px;' : ''}" onclick="switchAccount('${acc.handle}')">
-          <span style="font-weight:${isActive ? '700' : '500'}">@${acc.handle}</span>
-          <span style="color:var(--coral);font-weight:600">${acc.total.toLocaleString()} deleted</span>
-        </div>`;
+        const isActive = config.handle && acc.handle.toLowerCase() === config.handle.toLowerCase();
+        return `<button class="account-btn${isActive ? ' active' : ''}" onclick="switchAccount('${acc.handle}')">
+          @${acc.handle}
+          <span class="account-stat">${acc.total > 0 ? acc.total.toLocaleString() : ''}</span>
+          <span class="remove-btn" onclick="event.stopPropagation(); removeAccount('${acc.handle}')" title="Remove account">×</span>
+        </button>`;
       }).join('');
+    }
+
+    function removeAccount(handle) {
+      // Don't allow removing current account while it's active
+      if (config.handle && handle.toLowerCase() === config.handle.toLowerCase()) {
+        showNotification('Switch to another account first before removing this one', 'warn');
+        return;
+      }
+
+      // Remove from localStorage
+      const key = getStatsKey(handle);
+      localStorage.removeItem(key);
+
+      // Also tell backend to remove session data
+      ipcRenderer.send('remove-account-session', handle);
+
+      updateAllAccountsList();
+      showNotification(`Removed @${handle}`, 'success');
     }
 
     function switchAccount(handle) {
       config.handle = handle;
       document.getElementById('handleDisplay').textContent = '@' + handle;
       document.getElementById('avatar').textContent = handle[0].toUpperCase();
-      document.getElementById('statusDot').classList.add('ready');
+      document.getElementById('statusDot').classList.remove('ready'); // Reset until we verify login
       updateHistoryDisplay();
       updateAllAccountsList();
+      updateLoginButtonForAccount();
+      ipcRenderer.send('save-config', { handle: handle });  // Persist selection
     }
 
     let lastDeletedCount = 0;
     let sessionStartTime = null;
+    let wasStopped = false;  // Track if cleanup was stopped by user
 
     // Tabs
     document.querySelectorAll('.tab').forEach(tab => {
@@ -1014,7 +1458,7 @@
       });
     });
 
-    // Toggles
+    // Toggles - update config and persist
     document.querySelectorAll('.toggle').forEach(t => {
       t.addEventListener('click', () => {
         t.classList.toggle('on');
@@ -1024,15 +1468,18 @@
         if (s === 'reposts') config.reposts = t.classList.contains('on');
         if (s === 'showBrowser') config.headless = !t.classList.contains('on');
         if (s === 'privateMode') config.privateMode = t.classList.contains('on');
+        // Save settings
+        ipcRenderer.send('save-config', config);
       });
     });
 
-    // Speed
+    // Speed - update config and persist
     document.querySelectorAll('.speed-chip').forEach(c => {
       c.addEventListener('click', () => {
         document.querySelectorAll('.speed-chip').forEach(x => x.classList.remove('active'));
         c.classList.add('active');
         config.speed = c.dataset.speed;
+        ipcRenderer.send('save-config', config);
       });
     });
 
@@ -1052,6 +1499,20 @@
     document.getElementById('protectMonth').value = new Date().getMonth() + 1; // Current month
     document.getElementById('protectYear').value = yr;
 
+    // Save date selections when changed
+    ['deleteMonth', 'deleteYear', 'protectMonth', 'protectYear'].forEach(id => {
+      document.getElementById(id).addEventListener('change', (e) => {
+        config[id] = parseInt(e.target.value);
+        ipcRenderer.send('save-config', config);
+      });
+    });
+
+    // Save target when changed
+    document.getElementById('target').addEventListener('change', (e) => {
+      config.target = parseInt(e.target.value) || 200;
+      ipcRenderer.send('save-config', config);
+    });
+
     // Modal
     function showModal() {
       document.getElementById('modal').classList.add('show');
@@ -1066,11 +1527,11 @@
         config.handle = h;
         document.getElementById('handleDisplay').textContent = '@' + h;
         document.getElementById('avatar').textContent = h[0].toUpperCase();
-        document.getElementById('statusDot').classList.add('ready');
+        document.getElementById('statusDot').classList.remove('ready');  // Don't show ready until login verified
         updateHistoryDisplay();  // Update stats for new account
         updateAllAccountsList();  // Update accounts list
         ipcRenderer.send('save-config', { handle: h });  // Persist handle
-        ipcRenderer.send('check-session', h);  // Check if we have a saved session
+        ipcRenderer.send('check-session', h);  // Check if we have a saved session - this will update statusDot
       }
       hideModal();
     }
@@ -1079,19 +1540,12 @@
 
     function updateSessionButton() {
       const btn = document.getElementById('sessionBtn');
-      const label = document.getElementById('sessionLabel');
       if (isLoggedIn) {
         btn.textContent = 'Logout';
-        btn.style.background = 'var(--coral)';
-        btn.style.boxShadow = '0 0 15px var(--coral)';
-        btn.style.color = 'white';
-        label.textContent = 'Logged in';
+        btn.classList.add('logout');
       } else {
         btn.textContent = 'Login';
-        btn.style.background = 'var(--cyan)';
-        btn.style.boxShadow = '0 0 15px var(--cyan)';
-        btn.style.color = 'var(--dark)';
-        label.textContent = 'X Account';
+        btn.classList.remove('logout');
       }
     }
 
@@ -1124,6 +1578,19 @@
       ipcRenderer.send('logout-x', config.handle);
     }
 
+    // Update login button when switching accounts
+    function updateLoginButtonForAccount() {
+      const btn = document.getElementById('sessionBtn');
+      btn.disabled = false;
+      // Check session status for current handle
+      if (config.handle) {
+        ipcRenderer.send('check-session', config.handle);
+      } else {
+        isLoggedIn = false;
+        updateSessionButton();
+      }
+    }
+
     // Handle login result
     ipcRenderer.on('login-x-result', (event, { success, message }) => {
       const btn = document.getElementById('sessionBtn');
@@ -1145,14 +1612,8 @@
       if (success) {
         isLoggedIn = false;
         updateSessionButton();
-        // Clear the profile display
-        const clearedHandle = config.handle;
-        if (clearedHandle) {
-          config.handle = '';
-          document.getElementById('handleDisplay').textContent = 'Set Handle';
-          document.getElementById('avatar').textContent = '?';
-          document.getElementById('statusDot').classList.remove('ready');
-        }
+        // Don't clear profile - just update login status
+        document.getElementById('statusDot').classList.remove('ready');
         showNotification(message || 'Logged out!', 'success');
       } else {
         updateSessionButton();
@@ -1164,6 +1625,12 @@
     ipcRenderer.on('session-status', (event, { hasSession }) => {
       isLoggedIn = hasSession;
       updateSessionButton();
+      // Update status dot based on login state
+      if (hasSession) {
+        document.getElementById('statusDot').classList.add('ready');
+      } else {
+        document.getElementById('statusDot').classList.remove('ready');
+      }
     });
 
     // First-time login notification
@@ -1250,7 +1717,11 @@
     // Start
     function startCleanup() {
       if (!config.handle) { showModal(); return; }
-      if (isRunning) { ipcRenderer.send('stop-cleanup'); return; }
+      if (isRunning) {
+        wasStopped = true;
+        ipcRenderer.send('stop-cleanup');
+        return;
+      }
 
       config.target = parseInt(document.getElementById('target').value) || 200;
       config.deleteMonth = parseInt(document.getElementById('deleteMonth').value);
@@ -1262,10 +1733,15 @@
       isRunning = true;
       lastDeletedCount = 0;
       sessionStartTime = Date.now();
+      wasStopped = false;  // Reset stopped flag
 
-      // Update UI
+      // Reset all counters and UI
       updateTargetChips();
+      document.getElementById('progressNum').textContent = '0%';
       document.getElementById('progressStatus').textContent = 'Starting...';
+      document.getElementById('delCount').textContent = '0';
+      document.getElementById('protCount').textContent = '0';
+      document.getElementById('skipCount').textContent = '0';
       document.getElementById('timeElapsed').textContent = '0:00';
       document.getElementById('deleteRate').textContent = '0';
       document.getElementById('scannedCount').textContent = '0';
@@ -1317,8 +1793,13 @@
         elapsedInterval = null;
       }
 
-      document.getElementById('progressStatus').textContent = 'Complete!';
-      document.getElementById('progressNum').textContent = '100%';
+      // Show different message based on whether stopped or completed
+      if (wasStopped) {
+        document.getElementById('progressStatus').textContent = 'Stopped';
+      } else {
+        document.getElementById('progressStatus').textContent = 'Complete!';
+        document.getElementById('progressNum').textContent = '100%';
+      }
 
       const btn = document.getElementById('actionBtn');
       btn.classList.remove('running','stop');
@@ -1333,15 +1814,72 @@
     });
 
     ipcRenderer.on('load-config', (e, c) => {
-      if (c && c.handle) {
-        config.handle = c.handle;
-        document.getElementById('handleDisplay').textContent = '@' + c.handle;
-        document.getElementById('avatar').textContent = c.handle[0].toUpperCase();
-        document.getElementById('statusDot').classList.add('ready');
-        updateHistoryDisplay();  // Load stats for saved account
-        ipcRenderer.send('check-session', c.handle);  // Check login status
+      if (c) {
+        // Restore handle
+        if (c.handle) {
+          config.handle = c.handle;
+          document.getElementById('handleDisplay').textContent = '@' + c.handle;
+          document.getElementById('avatar').textContent = c.handle[0].toUpperCase();
+          document.getElementById('statusDot').classList.remove('ready');
+          updateHistoryDisplay();
+          ipcRenderer.send('check-session', c.handle);
+        }
+
+        // Restore toggles
+        if (c.posts !== undefined) {
+          config.posts = c.posts;
+          document.querySelector('[data-setting="posts"]').classList.toggle('on', c.posts);
+        }
+        if (c.replies !== undefined) {
+          config.replies = c.replies;
+          document.querySelector('[data-setting="replies"]').classList.toggle('on', c.replies);
+        }
+        if (c.reposts !== undefined) {
+          config.reposts = c.reposts;
+          document.querySelector('[data-setting="reposts"]').classList.toggle('on', c.reposts);
+        }
+        if (c.headless !== undefined) {
+          config.headless = c.headless;
+          document.querySelector('[data-setting="showBrowser"]').classList.toggle('on', !c.headless);
+        }
+        if (c.privateMode !== undefined) {
+          config.privateMode = c.privateMode;
+          document.querySelector('[data-setting="privateMode"]').classList.toggle('on', c.privateMode);
+        }
+
+        // Restore speed
+        if (c.speed) {
+          config.speed = c.speed;
+          document.querySelectorAll('.speed-chip').forEach(chip => {
+            chip.classList.toggle('active', chip.dataset.speed === c.speed);
+          });
+        }
+
+        // Restore target
+        if (c.target) {
+          config.target = c.target;
+          document.getElementById('target').value = c.target;
+        }
+
+        // Restore dates
+        if (c.deleteMonth) {
+          config.deleteMonth = c.deleteMonth;
+          document.getElementById('deleteMonth').value = c.deleteMonth;
+        }
+        if (c.deleteYear) {
+          config.deleteYear = c.deleteYear;
+          document.getElementById('deleteYear').value = c.deleteYear;
+        }
+        if (c.protectMonth) {
+          config.protectMonth = c.protectMonth;
+          document.getElementById('protectMonth').value = c.protectMonth;
+        }
+        if (c.protectYear) {
+          config.protectYear = c.protectYear;
+          document.getElementById('protectYear').value = c.protectYear;
+        }
       }
-      updateAllAccountsList();  // Always update accounts list
+      updateAllAccountsList();
     });
 
     ipcRenderer.send('get-config');

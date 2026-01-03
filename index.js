@@ -128,6 +128,19 @@ function printConfig(config) {
 // Callback for GUI mode logging
 let onLogCallback = null;
 
+// Abort controller for stopping cleanup
+let abortController = null;
+
+function isAborted() {
+  return abortController && abortController.signal.aborted;
+}
+
+function abortCleanup() {
+  if (abortController) {
+    abortController.abort();
+  }
+}
+
 function log(type, message, extra = "") {
   const plainMessage = `${message}${extra ? ' ' + extra : ''}`;
 
@@ -238,8 +251,22 @@ function saveConfig(config) {
 }
 
 // Get storage file path for specific handle
+// Use app's userData folder in Electron, or __dirname for CLI
 function getStoragePath(handle) {
-  return path.resolve(__dirname, `x_auth_${handle.toLowerCase()}.json`);
+  // Check if running in Electron
+  let basePath = __dirname;
+  try {
+    const { app } = require('electron');
+    if (app && app.getPath) {
+      basePath = app.getPath('userData');
+    }
+  } catch {
+    // Not in Electron main process, check if we can get userData from env
+    if (process.env.ELECTRON_USER_DATA) {
+      basePath = process.env.ELECTRON_USER_DATA;
+    }
+  }
+  return path.resolve(basePath, `x_auth_${handle.toLowerCase()}.json`);
 }
 
 // Check if session is valid (exists and not expired)
@@ -812,7 +839,7 @@ async function processTab(page, tabName, removed, startTime) {
   let noMatchPasses = 0;
   const MAX_NO_MATCH_PASSES = 10;
 
-  while (removed.count < TARGET) {
+  while (removed.count < TARGET && !isAborted()) {
     const need = TARGET - removed.count;
     let work = await collectWorklist(page, need, seen);
 
@@ -836,6 +863,7 @@ async function processTab(page, tabName, removed, startTime) {
     noMatchPasses = 0;
 
     for (const card of work) {
+      if (isAborted()) break;
       try {
         let res = await tryDelete(page, card);
         if (!res.ok) res = await tryUndoRepost(page, card);
@@ -850,7 +878,7 @@ async function processTab(page, tabName, removed, startTime) {
       if (removed.count >= TARGET) break;
     }
 
-    if (removed.count < TARGET) await autoScroll(page, 10);
+    if (removed.count < TARGET && !isAborted()) await autoScroll(page, 10);
   }
 }
 
@@ -886,8 +914,10 @@ async function run() {
       channel: 'msedge',
       args: [
         "--disable-blink-features=AutomationControlled",
-        "--disable-infobars"
-      ]
+        "--disable-infobars",
+        "--disable-automation"
+      ],
+      ignoreDefaultArgs: ["--enable-automation"]
     });
     // Use handle-specific storage if it exists and is valid
     const handleStorage = getStoragePath(PROFILE_HANDLE);
@@ -911,6 +941,7 @@ async function run() {
           args: [
             "--disable-blink-features=AutomationControlled",
             "--disable-infobars",
+            "--disable-automation",
             "--no-first-run",
             "--no-default-browser-check",
             "--enable-extensions",
@@ -929,8 +960,10 @@ async function run() {
         channel: 'msedge',
         args: [
           "--disable-blink-features=AutomationControlled",
-          "--disable-infobars"
-        ]
+          "--disable-infobars",
+          "--disable-automation"
+        ],
+        ignoreDefaultArgs: ["--enable-automation"]
       });
       const handleStorage = getStoragePath(PROFILE_HANDLE);
       const useStorage = isSessionValid(PROFILE_HANDLE) ? handleStorage : undefined;
@@ -1045,6 +1078,9 @@ async function runCleanup(config, callbacks = {}) {
   DELETE_BEFORE = new Date(DELETE_YEAR, DELETE_MONTH - 1, 1);
   PROTECT_AFTER = new Date(PROTECT_YEAR, PROTECT_MONTH - 1, 1);
 
+  // Create fresh abort controller for this run
+  abortController = new AbortController();
+
   // Run the cleanup
   const startTime = Date.now();
   let deletedCount = 0;
@@ -1053,10 +1089,19 @@ async function runCleanup(config, callbacks = {}) {
     await run();
     deletedCount = TARGET; // Will be updated properly
   } catch (err) {
-    if (callbacks.onLog) {
-      callbacks.onLog({ type: 'error', message: err?.message || String(err) });
+    if (!isAborted()) {
+      // Only report error if not aborted
+      if (callbacks.onLog) {
+        callbacks.onLog({ type: 'error', message: err?.message || String(err) });
+      }
+      throw err;
     }
-    throw err;
+  }
+
+  if (isAborted()) {
+    if (callbacks.onLog) {
+      callbacks.onLog({ type: 'info', message: 'Cleanup stopped by user' });
+    }
   }
 
   if (callbacks.onComplete) {
@@ -1069,7 +1114,7 @@ async function runCleanup(config, callbacks = {}) {
 }
 
 // Export for programmatic use
-module.exports = { run, runCleanup };
+module.exports = { run, runCleanup, abortCleanup };
 
 // Run if called directly (CLI mode)
 if (require.main === module) {

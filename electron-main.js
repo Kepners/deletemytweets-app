@@ -5,6 +5,7 @@ const path = require('path');
 let mainWindow;
 let isCleanupRunning = false;
 let runCleanup = null; // Lazy-load to avoid conflicts with Electron init
+let abortCleanup = null; // Function to abort running cleanup
 
 function createWindow() {
   // Create the browser window
@@ -82,11 +83,15 @@ ipcMain.on('start-cleanup', async (event, config) => {
     return;
   }
 
+  // Set environment variable so index.js can find session files
+  process.env.ELECTRON_USER_DATA = app.getPath('userData');
+
   // Lazy-load the cleanup module (avoids conflicts during Electron init)
   if (!runCleanup) {
     try {
       const cleanup = require('./index.js');
       runCleanup = cleanup.runCleanup;
+      abortCleanup = cleanup.abortCleanup;
     } catch (err) {
       event.reply('cleanup-error', `Failed to load cleanup module: ${err.message}`);
       return;
@@ -129,15 +134,15 @@ ipcMain.on('start-cleanup', async (event, config) => {
           });
         },
         onLog: ({ type, message }) => {
-          // Parse log messages to extract stats
+          // Use log type to track stats (more reliable than parsing message text)
           let statsChanged = false;
-          if (message.includes('DELETED')) {
+          if (type === 'delete') {
             cleanupStats.deleted++;
             statsChanged = true;
-          } else if (message.includes('PROTECTED') || message.includes('Protecting')) {
+          } else if (type === 'protect') {
             cleanupStats.protected++;
             statsChanged = true;
-          } else if (message.includes('SKIPPED') || message.includes('Skipping')) {
+          } else if (type === 'skip') {
             cleanupStats.skipped++;
             statsChanged = true;
           }
@@ -171,14 +176,108 @@ ipcMain.on('start-cleanup', async (event, config) => {
 });
 
 ipcMain.on('stop-cleanup', () => {
-  // Note: Can't easily stop async cleanup - would need AbortController
-  // For now, user can close the app
+  if (abortCleanup) {
+    abortCleanup();
+    mainWindow?.webContents.send('cleanup-log', { type: 'info', message: 'Stopping cleanup...' });
+  }
   isCleanupRunning = false;
 });
 
 // Config storage - persist between sessions
 const fs = require('fs');
 const configPath = path.join(app.getPath('userData'), 'config.json');
+
+// ═══════════════════════════════════════════════════════════
+// LICENSE KEY VALIDATION
+// ═══════════════════════════════════════════════════════════
+const licensePath = path.join(app.getPath('userData'), 'license.json');
+
+// Validate license key format: DMT-XXXX-XXXX-XXXX-XXXX
+function validateLicenseFormat(key) {
+  if (!key || key.length !== 23) return false;
+  const pattern = /^DMT-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/;
+  return pattern.test(key.toUpperCase());
+}
+
+function getLicenseData() {
+  try {
+    if (fs.existsSync(licensePath)) {
+      return JSON.parse(fs.readFileSync(licensePath, 'utf8'));
+    }
+  } catch (err) {
+    console.error('Error loading license:', err);
+  }
+  return null;
+}
+
+function saveLicenseData(licenseKey) {
+  const data = {
+    licenseKey: licenseKey.toUpperCase(),
+    activatedAt: new Date().toISOString()
+  };
+  try {
+    fs.writeFileSync(licensePath, JSON.stringify(data, null, 2));
+    return data;
+  } catch (err) {
+    console.error('Error saving license:', err);
+    return null;
+  }
+}
+
+function deleteLicenseData() {
+  try {
+    if (fs.existsSync(licensePath)) {
+      fs.unlinkSync(licensePath);
+      return true;
+    }
+  } catch (err) {
+    console.error('Error deleting license:', err);
+  }
+  return false;
+}
+
+// Get current license status
+ipcMain.on('get-license', (event) => {
+  const license = getLicenseData();
+  event.reply('license-status', license);
+});
+
+// Validate and save a new license key
+ipcMain.on('activate-license', (event, licenseKey) => {
+  if (!licenseKey) {
+    event.reply('license-result', { success: false, error: 'Please enter a license key' });
+    return;
+  }
+
+  const cleanKey = licenseKey.toUpperCase().trim();
+
+  if (!validateLicenseFormat(cleanKey)) {
+    event.reply('license-result', {
+      success: false,
+      error: 'Invalid license key format. Please check and try again.'
+    });
+    return;
+  }
+
+  const saved = saveLicenseData(cleanKey);
+  if (saved) {
+    event.reply('license-result', { success: true, license: saved });
+  } else {
+    event.reply('license-result', { success: false, error: 'Failed to save license' });
+  }
+});
+
+// Deactivate (delete) the current license
+ipcMain.on('deactivate-license', (event) => {
+  deleteLicenseData();
+  event.reply('license-status', null);
+});
+
+// Open external URL (for purchase link)
+ipcMain.on('open-external', (event, url) => {
+  const { shell } = require('electron');
+  shell.openExternal(url);
+});
 
 function loadConfig() {
   try {
@@ -208,10 +307,15 @@ ipcMain.on('save-config', (event, config) => {
   saveConfig(config);
 });
 
+// Helper to get session path for a handle (uses userData folder)
+function getSessionPath(handle) {
+  return path.join(app.getPath('userData'), `x_auth_${handle.toLowerCase()}.json`);
+}
+
 // Clear saved session for a handle
 ipcMain.on('clear-session', (event, handle) => {
   if (!handle) return;
-  const sessionPath = path.join(__dirname, `x_auth_${handle.toLowerCase()}.json`);
+  const sessionPath = getSessionPath(handle);
   try {
     if (fs.existsSync(sessionPath)) {
       fs.unlinkSync(sessionPath);
@@ -227,7 +331,7 @@ ipcMain.on('logout-x', async (event, handle) => {
   try {
     // 1. Clear our session file
     if (handle) {
-      const sessionPath = path.join(__dirname, `x_auth_${handle.toLowerCase()}.json`);
+      const sessionPath = getSessionPath(handle);
       if (fs.existsSync(sessionPath)) {
         fs.unlinkSync(sessionPath);
         console.log(`Cleared session file for @${handle}`);
@@ -279,13 +383,27 @@ ipcMain.on('check-session', (event, handle) => {
     event.reply('session-status', { hasSession: false });
     return;
   }
-  const sessionPath = path.join(__dirname, `x_auth_${handle.toLowerCase()}.json`);
+  const sessionPath = getSessionPath(handle);
   const hasSession = fs.existsSync(sessionPath);
   event.reply('session-status', { hasSession, isFirstTime: !hasSession });
 
   // Show helpful message for first-time users
   if (!hasSession) {
     mainWindow?.webContents.send('first-time-login', { handle });
+  }
+});
+
+// Remove account session data completely
+ipcMain.on('remove-account-session', (event, handle) => {
+  if (!handle) return;
+  const sessionPath = getSessionPath(handle);
+  try {
+    if (fs.existsSync(sessionPath)) {
+      fs.unlinkSync(sessionPath);
+      console.log(`Removed session data for @${handle}`);
+    }
+  } catch (err) {
+    console.error('Error removing session:', err);
   }
 });
 
@@ -305,7 +423,12 @@ ipcMain.on('login-x', async (event, handle) => {
         {
           headless: false,
           channel: 'msedge',
-          args: ['--disable-blink-features=AutomationControlled', '--disable-infobars']
+          args: [
+            '--disable-blink-features=AutomationControlled',
+            '--disable-infobars',
+            '--disable-automation'
+          ],
+          ignoreDefaultArgs: ['--enable-automation']
         }
       );
     } catch (err) {
@@ -313,7 +436,12 @@ ipcMain.on('login-x', async (event, handle) => {
       browser = await chromium.launch({
         headless: false,
         channel: 'msedge',
-        args: ['--disable-blink-features=AutomationControlled', '--disable-infobars']
+        args: [
+          '--disable-blink-features=AutomationControlled',
+          '--disable-infobars',
+          '--disable-automation'
+        ],
+        ignoreDefaultArgs: ['--enable-automation']
       });
       context = await browser.newContext();
     }
@@ -338,9 +466,10 @@ ipcMain.on('login-x', async (event, handle) => {
     }
 
     if (loggedIn) {
-      // Save session
-      const sessionPath = path.join(__dirname, `x_auth_${handle.toLowerCase()}.json`);
+      // Save session to userData folder (consistent with getSessionPath)
+      const sessionPath = getSessionPath(handle);
       await context.storageState({ path: sessionPath });
+      console.log(`Session saved to: ${sessionPath}`);
 
       if (browser) await browser.close();
       else await context.close();
