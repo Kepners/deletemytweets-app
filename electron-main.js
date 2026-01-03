@@ -83,6 +83,13 @@ ipcMain.on('start-cleanup', async (event, config) => {
     return;
   }
 
+  // Validate license before allowing cleanup
+  const license = getLicenseData();
+  if (!license || !license.licenseKey || !validateLicenseFormat(license.licenseKey)) {
+    event.reply('cleanup-error', 'No valid license found. Please activate a license to use this feature.');
+    return;
+  }
+
   // Set environment variable so index.js can find session files
   process.env.ELECTRON_USER_DATA = app.getPath('userData');
 

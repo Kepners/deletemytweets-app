@@ -1197,6 +1197,9 @@
 
     function deactivateLicense() {
       if (confirm('Deactivate your license? You will need to enter a license key to use the app again.')) {
+        // Immediately invalidate license state before IPC response
+        hasValidLicense = false;
+        disableAppUI();
         ipcRenderer.send('deactivate-license');
       }
     }
@@ -1216,6 +1219,7 @@
         statusEl.textContent = 'Not Active';
         statusEl.style.color = 'var(--coral)';
         keyEl.textContent = 'No license';
+        disableAppUI();
       }
     }
 
@@ -1717,6 +1721,14 @@
     // Start
     function startCleanup() {
       if (!config.handle) { showModal(); return; }
+
+      // Check for valid license before starting cleanup
+      if (!hasValidLicense) {
+        showNotification('License required to start cleanup', 'warn');
+        showLicenseModal();
+        return;
+      }
+
       if (isRunning) {
         wasStopped = true;
         ipcRenderer.send('stop-cleanup');
@@ -1782,6 +1794,29 @@
       const cls = d.type === 'success' ? 'ok' : d.type === 'error' ? 'err' : '';
       log.innerHTML += `<div class="log-line ${cls}">${d.message}</div>`;
       log.scrollTop = log.scrollHeight;
+    });
+
+    ipcRenderer.on('cleanup-error', (e, errorMessage) => {
+      isRunning = false;
+
+      // Stop timer if running
+      if (elapsedInterval) {
+        clearInterval(elapsedInterval);
+        elapsedInterval = null;
+      }
+
+      // Reset button
+      const btn = document.getElementById('actionBtn');
+      btn.classList.remove('running', 'stop');
+      btn.textContent = 'Start Cleanup';
+
+      // Show error
+      showNotification(errorMessage || 'Cleanup failed', 'warn');
+
+      // If it's a license error, show the license modal
+      if (errorMessage && errorMessage.toLowerCase().includes('license')) {
+        showLicenseModal();
+      }
     });
 
     ipcRenderer.on('cleanup-complete', () => {
