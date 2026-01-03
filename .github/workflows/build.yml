@@ -22,7 +22,7 @@ jobs:
         run: npm ci
 
       - name: Build Windows app
-        run: npm run build
+        run: npx electron-builder --win --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
@@ -65,7 +65,7 @@ jobs:
           iconutil -c icns icon.iconset -o icon.icns 2>/dev/null || echo "Using default icon"
 
       - name: Build macOS app
-        run: npm run build:mac
+        run: npx electron-builder --mac --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
