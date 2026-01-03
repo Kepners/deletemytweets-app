@@ -442,6 +442,27 @@
       margin-bottom: 6px;
     }
 
+    /* Collapsible License Card */
+    .license-collapsible {
+      cursor: pointer;
+      transition: all 0.3s ease;
+    }
+    .license-collapsible .license-expanded {
+      display: none;
+    }
+    .license-collapsible .license-collapsed {
+      display: block;
+    }
+    .license-collapsible.expanded .license-expanded {
+      display: block;
+    }
+    .license-collapsible.expanded .license-collapsed {
+      display: none;
+    }
+    .license-collapsible:hover {
+      border-color: var(--white-20);
+    }
+
     .card-row {
       display: flex;
       align-items: center;
@@ -864,10 +885,6 @@
         <div class="account-list" id="accountList">
           <div class="no-accounts">No saved accounts</div>
         </div>
-        <div class="account-row private-row">
-          <span class="card-label">Private browser</span>
-          <div class="toggle" data-setting="privateMode"></div>
-        </div>
       </div>
     </div>
 
@@ -939,48 +956,62 @@
             <span class="card-label">Show browser</span>
             <div class="toggle on" data-setting="showBrowser"></div>
           </div>
+          <div class="card-row">
+            <span class="card-label">Private browser</span>
+            <div class="toggle" data-setting="privateMode"></div>
+          </div>
         </div>
 
         <div class="section-head">License</div>
-        <div class="glass-card" id="licenseCard">
-          <div class="card-row">
-            <span class="card-label">Status</span>
-            <span id="licenseStatus" style="font-weight: 700; color: var(--cyan);">Active ✓</span>
+        <div class="glass-card license-collapsible" id="licenseCard" onclick="toggleLicenseDetails(event)">
+          <!-- Collapsed view (default) -->
+          <div class="license-collapsed" id="licenseCollapsed">
+            <div class="card-row" style="border: none; cursor: pointer;">
+              <span class="card-label">Status</span>
+              <span id="licenseStatus" style="font-weight: 700; color: var(--cyan);">Active ✓</span>
+            </div>
           </div>
-          <div class="card-row">
-            <span class="card-label">Key</span>
-            <span id="licenseKeyDisplay" style="font-family: monospace; font-size: 11px; color: var(--white-60);">DMT-****-****-****-****</span>
-          </div>
-          <div class="card-row" style="border: none;">
-            <span style="font-size: 10px; color: var(--white-30); line-height: 1.4;">
-              Personal use on up to 2 devices.<br>Lifetime access to all updates.
-            </span>
-          </div>
-          <div style="display: flex; gap: 8px; margin-top: 8px;">
-            <button onclick="showLicenseModal()" style="
-              flex: 1;
-              padding: 10px;
-              background: var(--white-10);
-              border: 1px solid var(--white-10);
-              border-radius: 8px;
-              color: var(--white-60);
-              font-size: 11px;
-              font-weight: 600;
-              cursor: pointer;
-              transition: all 0.2s;
-            ">Change Key</button>
-            <button onclick="deactivateLicense()" style="
-              flex: 1;
-              padding: 10px;
-              background: rgba(255,42,109,0.15);
-              border: 1px solid var(--coral);
-              border-radius: 8px;
-              color: var(--coral);
-              font-size: 11px;
-              font-weight: 600;
-              cursor: pointer;
-              transition: all 0.2s;
-            ">Deactivate</button>
+          <!-- Expanded view (on hover/click) -->
+          <div class="license-expanded" id="licenseExpanded">
+            <div class="card-row">
+              <span class="card-label">Status</span>
+              <span id="licenseStatusExpanded" style="font-weight: 700; color: var(--cyan);">Active ✓</span>
+            </div>
+            <div class="card-row">
+              <span class="card-label">Key</span>
+              <span id="licenseKeyDisplay" style="font-family: monospace; font-size: 11px; color: var(--white-60);">DMT-****-****-****-****</span>
+            </div>
+            <div class="card-row" style="border: none;">
+              <span style="font-size: 10px; color: var(--white-30); line-height: 1.4;">
+                Personal use on up to 2 devices.<br>Lifetime access to all updates.
+              </span>
+            </div>
+            <div style="display: flex; gap: 8px; margin-top: 8px;">
+              <button onclick="showLicenseModal(); event.stopPropagation();" style="
+                flex: 1;
+                padding: 10px;
+                background: var(--white-10);
+                border: 1px solid var(--white-10);
+                border-radius: 8px;
+                color: var(--white-60);
+                font-size: 11px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: all 0.2s;
+              ">Change Key</button>
+              <button onclick="deactivateLicense(); event.stopPropagation();" style="
+                flex: 1;
+                padding: 10px;
+                background: rgba(255,42,109,0.15);
+                border: 1px solid var(--coral);
+                border-radius: 8px;
+                color: var(--coral);
+                font-size: 11px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: all 0.2s;
+              ">Deactivate</button>
+            </div>
           </div>
         </div>
 
@@ -1218,21 +1249,37 @@
 
     function updateLicenseDisplay(license) {
       const statusEl = document.getElementById('licenseStatus');
+      const statusExpandedEl = document.getElementById('licenseStatusExpanded');
       const keyEl = document.getElementById('licenseKeyDisplay');
 
       if (license && license.licenseKey) {
         hasValidLicense = true;
         statusEl.textContent = 'Active ✓';
         statusEl.style.color = 'var(--cyan)';
+        if (statusExpandedEl) {
+          statusExpandedEl.textContent = 'Active ✓';
+          statusExpandedEl.style.color = 'var(--cyan)';
+        }
         keyEl.textContent = maskLicenseKey(license.licenseKey);
         enableAppUI();
       } else {
         hasValidLicense = false;
         statusEl.textContent = 'Not Active';
         statusEl.style.color = 'var(--coral)';
+        if (statusExpandedEl) {
+          statusExpandedEl.textContent = 'Not Active';
+          statusExpandedEl.style.color = 'var(--coral)';
+        }
         keyEl.textContent = 'No license';
         disableAppUI();
       }
+    }
+
+    function toggleLicenseDetails(event) {
+      // Don't toggle if clicking buttons
+      if (event.target.tagName === 'BUTTON') return;
+      const card = document.getElementById('licenseCard');
+      card.classList.toggle('expanded');
     }
 
     function enableAppUI() {
