@@ -7,10 +7,12 @@
     "deletemytweets": "index.js"
   },
   "scripts": {
-    "start": ".\\node_modules\\electron\\dist\\electron.exe electron-main.js",
+    "start": "electron electron-main.js",
     "cli": "node index.js",
     "cleanup": "node index.js",
-    "build": "set CSC_IDENTITY_AUTO_DISCOVERY=false && electron-builder --win",
+    "build": "electron-builder --win",
+    "build:mac": "electron-builder --mac",
+    "build:all": "electron-builder --win --mac",
     "build:cli": "pkg . --targets node18-win-x64 --output DeleteMyTweets.exe"
   },
   "pkg": {
@@ -59,7 +61,7 @@
     "sharp": "^0.34.5"
   },
   "build": {
-    "appId": "com.kepners.deletemytweets",
+    "appId": "com.choppedonions.deletemytweets",
     "productName": "Delete My Tweets",
     "win": {
       "target": [
@@ -67,6 +69,14 @@
         "nsis"
       ],
       "icon": "icon.ico"
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "icon": "icon.icns",
+      "category": "public.app-category.utilities"
     },
     "nsis": {
       "oneClick": false,
@@ -77,7 +87,8 @@
       "app.html",
       "index.js",
       "package.json",
-      "icon.ico"
+      "icon.ico",
+      "icon.icns"
     ]
   }
 }
