@@ -1,0 +1,17 @@
+{
+  "version": 2,
+  "functions": {
+    "api/stripe-webhook.js": {
+      "maxDuration": 30
+    },
+    "api/validate-license.js": {
+      "maxDuration": 10
+    }
+  },
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "/api/$1"
+    }
+  ]
+}

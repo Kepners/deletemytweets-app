@@ -930,6 +930,11 @@
               <button class="speed-chip" data-speed="conservative">🐢 Safe</button>
             </div>
           </div>
+          <div id="speedWarning" style="display: none; padding: 8px 12px; margin: 4px 0; background: rgba(255,42,109,0.15); border-radius: 8px; border-left: 3px solid var(--coral);">
+            <span style="font-size: 10px; color: var(--coral); line-height: 1.4;">
+              ⚠️ Fast mode deletes quickly and may risk account restrictions if used for large batches. Best for under 100 tweets.
+            </span>
+          </div>
           <div class="card-row">
             <span class="card-label">Show browser</span>
             <div class="toggle on" data-setting="showBrowser"></div>
@@ -977,6 +982,13 @@
               transition: all 0.2s;
             ">Deactivate</button>
           </div>
+        </div>
+
+        <!-- Footer -->
+        <div style="text-align: center; margin-top: 16px; padding-bottom: 8px;">
+          <span style="font-size: 10px; color: var(--white-20);">
+            v1.1.0 · A product of <a href="#" onclick="ipcRenderer.send('open-external', 'https://choppedonions.xyz'); return false;" style="color: var(--white-30); text-decoration: none;">ChoppedOnions.xyz</a>
+          </span>
         </div>
 
       </div>
@@ -1164,7 +1176,7 @@
     }
 
     function openPurchaseLink() {
-      ipcRenderer.send('open-external', 'https://deletemytweets.app/pricing');
+      ipcRenderer.send('open-external', 'https://buy.stripe.com/00w3cv9Vi6018hs8up0co00');
     }
 
     function openSupportLink() {
@@ -1254,14 +1266,11 @@
 
     // Handle license status from main process
     ipcRenderer.on('license-status', (event, license) => {
-      updateLicenseDisplay(license);
+      updateLicenseDisplay(license);  // This handles enableAppUI/disableAppUI internally
       if (!license || !license.licenseKey) {
-        // No valid license - show modal and disable app
         showLicenseModal();
-        disableAppUI();
       } else {
         hideLicenseModal();
-        enableAppUI();
       }
     });
 
@@ -1483,6 +1492,9 @@
         document.querySelectorAll('.speed-chip').forEach(x => x.classList.remove('active'));
         c.classList.add('active');
         config.speed = c.dataset.speed;
+        // Show warning for aggressive/fast speed
+        document.getElementById('speedWarning').style.display =
+          c.dataset.speed === 'aggressive' ? 'block' : 'none';
         ipcRenderer.send('save-config', config);
       });
     });
@@ -1888,6 +1900,9 @@
           document.querySelectorAll('.speed-chip').forEach(chip => {
             chip.classList.toggle('active', chip.dataset.speed === c.speed);
           });
+          // Show warning if aggressive speed was saved
+          document.getElementById('speedWarning').style.display =
+            c.speed === 'aggressive' ? 'block' : 'none';
         }
 
         // Restore target

@@ -199,6 +199,9 @@ const configPath = path.join(app.getPath('userData'), 'config.json');
 // ═══════════════════════════════════════════════════════════
 const licensePath = path.join(app.getPath('userData'), 'license.json');
 
+// License validation API URL
+const LICENSE_API_URL = 'https://deletemytweets.app/api/validate-license';
+
 // Validate license key format: DMT-XXXX-XXXX-XXXX-XXXX
 function validateLicenseFormat(key) {
   if (!key || key.length !== 23) return false;
@@ -250,7 +253,7 @@ ipcMain.on('get-license', (event) => {
 });
 
 // Validate and save a new license key
-ipcMain.on('activate-license', (event, licenseKey) => {
+ipcMain.on('activate-license', async (event, licenseKey) => {
   if (!licenseKey) {
     event.reply('license-result', { success: false, error: 'Please enter a license key' });
     return;
@@ -258,6 +261,7 @@ ipcMain.on('activate-license', (event, licenseKey) => {
 
   const cleanKey = licenseKey.toUpperCase().trim();
 
+  // Check format first (quick client-side validation)
   if (!validateLicenseFormat(cleanKey)) {
     event.reply('license-result', {
       success: false,
@@ -266,11 +270,46 @@ ipcMain.on('activate-license', (event, licenseKey) => {
     return;
   }
 
-  const saved = saveLicenseData(cleanKey);
-  if (saved) {
-    event.reply('license-result', { success: true, license: saved });
-  } else {
-    event.reply('license-result', { success: false, error: 'Failed to save license' });
+  // Validate against server
+  try {
+    const fetch = require('node-fetch');
+    const response = await fetch(LICENSE_API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ licenseKey: cleanKey })
+    });
+
+    const result = await response.json();
+
+    if (!result.valid) {
+      event.reply('license-result', {
+        success: false,
+        error: result.error || 'Invalid license key. Please check and try again.'
+      });
+      return;
+    }
+
+    // License is valid - save it locally
+    const saved = saveLicenseData(cleanKey);
+    if (saved) {
+      event.reply('license-result', { success: true, license: saved });
+    } else {
+      event.reply('license-result', { success: false, error: 'Failed to save license' });
+    }
+  } catch (err) {
+    console.error('License validation API error:', err);
+    // If API is unreachable, fall back to format-only validation (offline mode)
+    // This allows the app to work offline after initial activation
+    const existingLicense = getLicenseData();
+    if (existingLicense && existingLicense.licenseKey === cleanKey) {
+      // Re-activating same key - allow it
+      event.reply('license-result', { success: true, license: existingLicense });
+    } else {
+      event.reply('license-result', {
+        success: false,
+        error: 'Unable to verify license. Please check your internet connection.'
+      });
+    }
   }
 });
 
@@ -318,20 +357,6 @@ ipcMain.on('save-config', (event, config) => {
 function getSessionPath(handle) {
   return path.join(app.getPath('userData'), `x_auth_${handle.toLowerCase()}.json`);
 }
-
-// Clear saved session for a handle
-ipcMain.on('clear-session', (event, handle) => {
-  if (!handle) return;
-  const sessionPath = getSessionPath(handle);
-  try {
-    if (fs.existsSync(sessionPath)) {
-      fs.unlinkSync(sessionPath);
-      console.log(`Cleared session for @${handle}`);
-    }
-  } catch (err) {
-    console.error('Error clearing session:', err);
-  }
-});
 
 // Logout of X - clears session file and Edge cookies (no browser needed!)
 ipcMain.on('logout-x', async (event, handle) => {
