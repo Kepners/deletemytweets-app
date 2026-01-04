@@ -11,6 +11,11 @@ dist/
 # OS files
 .DS_Store
 Thumbs.db
+nul
+*.png
+
+# Local settings
+.claude/settings.local.json
 
 # Logs
 *.log
