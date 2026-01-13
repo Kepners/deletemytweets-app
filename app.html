@@ -291,7 +291,7 @@
       border: 1px solid var(--white-10);
       border-radius: 20px;
       color: var(--white-60);
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 500;
       cursor: pointer;
       transition: all 0.2s;
@@ -470,6 +470,7 @@
       gap: 12px;
       padding: 6px 0;
       border-bottom: 1px solid var(--white-10);
+      font-size: 11px;
     }
 
     .card-row:last-child { border-bottom: none; padding-bottom: 0; }
@@ -1983,6 +1984,27 @@
 
     // Initialize accounts list on load
     updateAllAccountsList();
+
+    // Initialize history display with any existing data
+    // Check localStorage directly for any existing stats
+    setTimeout(() => {
+      // Look for any existing stats in localStorage
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith('deletionStats_')) {
+          // Found existing stats - if no handle set, use this one
+          if (!config.handle) {
+            const handle = key.replace('deletionStats_', '');
+            config.handle = handle;
+            document.getElementById('handleDisplay').textContent = '@' + handle;
+            document.getElementById('avatar').textContent = handle[0].toUpperCase();
+          }
+          break;
+        }
+      }
+      updateHistoryDisplay();
+      updateAllAccountsList();
+    }, 100);
   </script>
 </body>
 </html>

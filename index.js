@@ -233,7 +233,7 @@ function stopProgress() {
 
 // ================= CONFIG FILE =================
 const CONFIG_FILE = path.resolve(__dirname, "deletemytweets_config.json");
-const SESSION_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24 hours
+const SESSION_EXPIRY_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
 function loadConfig() {
   try {
@@ -321,7 +321,7 @@ let MIN_DELAY_MS = 1200;
 let MAX_DELAY_MS = 2200;
 let LOGIN_WAIT_MS = 3 * 60 * 1000;
 let STORAGE = path.resolve(__dirname, "x_auth_storage.json");
-let MAX_SCROLL_PASSES = 5;
+let MAX_SCROLL_PASSES = 8;
 let SCROLL_MIN_WAIT_MS = 300;
 let SCROLL_MAX_WAIT_MS = 600;
 let SCROLL_STEP_RATIO = 0.92;
@@ -515,12 +515,24 @@ async function ensureLoggedIn(page, context) {
       try { await context.storageState({ path: storagePath }); } catch {}
       return true;
     } else {
-      // Logged in but wrong account - need to switch accounts
+      // Logged in but wrong account - clear cookies and force re-login
       log("warn", chalk.yellow(`Logged in as wrong account! Need @${PROFILE_HANDLE}`));
-      log("info", "Please log out at x.com/logout and log in as the correct account");
+      log("info", "Clearing session and opening login page...");
       clearSession(PROFILE_HANDLE);
-      // Navigate to logout page to help user switch accounts
-      await page.goto('https://x.com/logout', { waitUntil: "domcontentloaded" }).catch(() => {});
+
+      // Clear all cookies to force fresh login
+      await context.clearCookies();
+
+      // Navigate to logout then login
+      await page.goto('https://x.com/logout', { waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
+      await page.waitForTimeout(1000);
+      // Click logout confirm if present
+      const logoutBtn = page.locator('[data-testid="confirmationSheetConfirm"]');
+      if (await logoutBtn.count() > 0) {
+        await logoutBtn.click().catch(() => {});
+        await page.waitForTimeout(2000);
+      }
+      await page.goto('https://x.com/login', { waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
     }
   } else {
     // Not logged in at all
@@ -720,10 +732,21 @@ async function autoScroll(page, wantMore = 15) {
 
   for (let pass = 0; pass < MAX_SCROLL_PASSES; pass++) {
     const step = await page.evaluate(r => Math.max(240, Math.floor(window.innerHeight * r)), SCROLL_STEP_RATIO);
+
+    // Scroll down in chunks
     for (let i = 0; i < 10; i++) {
       await page.evaluate(px => window.scrollBy(0, px), step);
       await page.waitForTimeout(rand(SCROLL_MIN_WAIT_MS, SCROLL_MAX_WAIT_MS));
     }
+
+    // Stop-start pattern: scroll to top briefly, then back down (forces X to reload)
+    if (pass > 0 && pass % 3 === 0) {
+      await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
+      await page.waitForTimeout(500);
+      await page.evaluate(() => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "instant" }));
+      await page.waitForTimeout(800);
+    }
+
     const h = await page.evaluate(() => document.documentElement.scrollHeight);
     stale = (h === lastH) ? stale + 1 : 0;
     lastH = h;
@@ -731,7 +754,7 @@ async function autoScroll(page, wantMore = 15) {
     const now = await allCards(page).count();
     if (now - prevCount >= wantMore) break;
     prevCount = now;
-    if (stale >= 2) break;
+    if (stale >= 3) break; // Increased from 2 to 3
   }
   if (RETURN_TO_TOP) await page.evaluate(() => window.scrollTo({ top: 0, behavior: "smooth" }));
 }
@@ -837,7 +860,9 @@ async function processTab(page, tabName, removed, startTime) {
 
   const seen = new Set();
   let noMatchPasses = 0;
-  const MAX_NO_MATCH_PASSES = 10;
+  const MAX_NO_MATCH_PASSES = 25;
+  let refreshCount = 0;
+  const MAX_REFRESHES = 3;
 
   while (removed.count < TARGET && !isAborted()) {
     const need = TARGET - removed.count;
@@ -851,6 +876,16 @@ async function processTab(page, tabName, removed, startTime) {
       if (after <= before) {
         noMatchPasses++;
         if (noMatchPasses >= MAX_NO_MATCH_PASSES) {
+          // Try refreshing the page before giving up
+          if (refreshCount < MAX_REFRESHES) {
+            refreshCount++;
+            log("info", chalk.yellow(`Refreshing page (attempt ${refreshCount}/${MAX_REFRESHES})...`));
+            await page.reload({ waitUntil: "domcontentloaded", timeout: 30000 });
+            await page.waitForTimeout(3000);
+            await autoScroll(page, 18);
+            noMatchPasses = 0; // Reset counter after refresh
+            continue;
+          }
           log("info", chalk.gray(`No more matching tweets on ${tabName}`));
           break;
         }
