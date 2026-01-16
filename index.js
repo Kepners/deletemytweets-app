@@ -725,56 +725,18 @@ async function isYours(page, card) {
   return false;
 }
 
-async function autoScroll(page, wantMore = 15) {
-  let prevCount = await allCards(page).count();
-  let lastH = await page.evaluate(() => document.documentElement.scrollHeight);
-  let stale = 0;
-  let backoffMs = 1000; // Start with 1 second backoff
-
-  for (let pass = 0; pass < MAX_SCROLL_PASSES; pass++) {
-    const step = await page.evaluate(r => Math.max(240, Math.floor(window.innerHeight * r)), SCROLL_STEP_RATIO);
-
-    // Scroll down in smaller chunks with longer waits (more human-like)
-    for (let i = 0; i < 5; i++) {
-      await page.evaluate(px => window.scrollBy(0, px), step);
-      await page.waitForTimeout(rand(500, 1000)); // Slower scrolling
-    }
-
-    // Every 5 passes, take a breather to let Twitter catch up
-    if (pass > 0 && pass % 5 === 0) {
-      log("info", `Pausing to let Twitter load more tweets (pass ${pass})...`);
-      await page.waitForTimeout(rand(2000, 4000)); // 2-4 second pause
-    }
-
-    const h = await page.evaluate(() => document.documentElement.scrollHeight);
-    const heightChanged = h !== lastH;
-
-    if (!heightChanged) {
-      stale++;
-      // Exponential backoff when Twitter stops loading
-      log("info", `No new content, waiting ${Math.round(backoffMs/1000)}s before retry...`);
-      await page.waitForTimeout(backoffMs);
-      backoffMs = Math.min(backoffMs * 1.5, 10000); // Max 10 second backoff
-
-      // Try scrolling up then down to trigger reload
-      if (stale % 2 === 0) {
-        await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
-        await page.waitForTimeout(1500);
-        await page.evaluate(() => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "smooth" }));
-        await page.waitForTimeout(2000);
-      }
-    } else {
-      stale = 0;
-      backoffMs = 1000; // Reset backoff when content loads
-    }
-    lastH = h;
-
-    const now = await allCards(page).count();
-    if (now - prevCount >= wantMore) break;
-    prevCount = now;
-    if (stale >= 6) break; // Give up after 6 stale attempts with backoff
+// Scroll down to load more tweets
+async function scrollToLoadTweets(page, passes = 5) {
+  for (let i = 0; i < passes; i++) {
+    await page.evaluate(() => window.scrollBy(0, window.innerHeight * 0.8));
+    await page.waitForTimeout(600);
   }
-  if (RETURN_TO_TOP) await page.evaluate(() => window.scrollTo({ top: 0, behavior: "smooth" }));
+}
+
+// Scroll to top of page
+async function scrollToTop(page) {
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.waitForTimeout(300);
 }
 
 async function statusKey(card) {
@@ -848,7 +810,6 @@ async function tryUndoRepost(page, card) {
 async function collectWorklist(page, want, seen) {
   const cards = allCards(page);
   const n = await cards.count();
-  log("info", `Found ${n} tweet cards on page, checking dates...`);
   const mine = [];
   for (let i = 0; i < n && mine.length < want; i++) {
     const card = cards.nth(i);
@@ -873,94 +834,70 @@ async function collectWorklist(page, want, seen) {
 async function processTab(page, tabName, removed, startTime) {
   console.log("");
   log("tab", chalk.magenta.bold(`Processing ${tabName}`));
-  log("info", `Date filter: DELETE tweets before ${formatDate(DELETE_BEFORE)}, PROTECT tweets after ${formatDate(PROTECT_AFTER)}`);
+  log("info", `DELETE before ${formatDate(DELETE_BEFORE)}, PROTECT after ${formatDate(PROTECT_AFTER)}`);
 
   await gotoProfileTab(page, tabName);
 
   const seen = new Set();
-  const BATCH_SIZE = TARGET; // Delete all target tweets before refresh (user sets this via target)
-  let batchDeleted = 0;
-  let totalCycles = 0;
-  const MAX_CYCLES = 20; // Safety limit
+  let emptyPasses = 0;
+  let scrollDepth = 5; // Start shallow, go deeper if needed
 
-  while (removed.count < TARGET && !isAborted() && totalCycles < MAX_CYCLES) {
-    totalCycles++;
+  while (removed.count < TARGET && !isAborted()) {
+    // Step 1: Always start from top
+    await scrollToTop(page);
 
-    // === PHASE 1: Load tweets by scrolling down ===
-    log("info", `Cycle ${totalCycles}: Loading tweets...`);
-    await autoScroll(page, 30); // Aggressive scroll to load lots of tweets
+    // Step 2: Scroll down to load tweets
+    await scrollToLoadTweets(page, scrollDepth);
 
-    // === PHASE 2: Go to top ONCE ===
-    await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
-    await page.waitForTimeout(1000);
+    // Step 3: Find deletable tweets
+    const work = await collectWorklist(page, Math.min(20, TARGET - removed.count), seen);
 
-    // === PHASE 3: Delete from top, naturally scrolling down ===
-    batchDeleted = 0;
-    let emptyPasses = 0;
+    if (work.length === 0) {
+      emptyPasses++;
 
-    while (batchDeleted < BATCH_SIZE && removed.count < TARGET && !isAborted()) {
-      // Find ONE tweet to delete (don't grab a big batch)
-      const cards = allCards(page);
-      const n = await cards.count();
-      let foundOne = false;
-
-      for (let i = 0; i < n && !foundOne; i++) {
-        const card = cards.nth(i);
-        const key = await statusKey(card);
-        if (!key || seen.has(key)) continue;
-        seen.add(key);
-
-        // Check if this tweet should be deleted
-        if (!(await shouldDeleteByDate(card))) continue;
-        if (!(await isYours(page, card))) continue;
-
-        // Found one! Delete it
-        foundOne = true;
-        try {
-          await card.scrollIntoViewIfNeeded().catch(() => {});
-          await page.waitForTimeout(150);
-
-          let res = await tryDelete(page, card);
-          if (!res.ok) res = await tryUndoRepost(page, card);
-
-          if (res.ok) {
-            removed.count++;
-            batchDeleted++;
-            updateProgress(removed.count, tabName, TARGET);
-            emptyPasses = 0;
-
-            // Small pause, then continue (tweet disappears, next slides up)
-            await pause(MIN_DELAY_MS, MAX_DELAY_MS);
-          }
-        } catch (e) {
-          log("error", chalk.red("Delete failed"), e?.message || e);
-        }
+      if (emptyPasses <= 3) {
+        // Try scrolling deeper to find older tweets
+        scrollDepth = Math.min(scrollDepth + 10, 50);
+        log("info", `No tweets found, scrolling deeper (${scrollDepth} passes)...`);
+        continue;
       }
 
-      if (!foundOne) {
-        emptyPasses++;
-        // Scroll down a bit to find more
-        await page.evaluate(() => window.scrollBy(0, 500));
-        await page.waitForTimeout(500);
+      // Really nothing left
+      log("info", "No more deletable tweets found. Done with tab.");
+      break;
+    }
 
-        if (emptyPasses >= 10) {
-          log("info", "No more deletable tweets in view, moving to next cycle...");
-          break;
+    // Found tweets - reset counters
+    emptyPasses = 0;
+    scrollDepth = 5;
+
+    // Step 4: Delete each tweet
+    for (const card of work) {
+      if (isAborted() || removed.count >= TARGET) break;
+
+      try {
+        // Scroll tweet into view
+        await card.scrollIntoViewIfNeeded().catch(() => {});
+        await page.waitForTimeout(100);
+
+        // Try to delete
+        let res = await tryDelete(page, card);
+        if (!res.ok) res = await tryUndoRepost(page, card);
+
+        if (res.ok) {
+          removed.count++;
+          updateProgress(removed.count, tabName, TARGET);
         }
+      } catch (e) {
+        log("error", "Delete failed", e?.message || e);
       }
+
+      // Delay between deletions
+      await pause(MIN_DELAY_MS, MAX_DELAY_MS);
     }
 
-    // === PHASE 4: After batch, hard refresh to load fresh tweets ===
-    if (removed.count < TARGET && !isAborted()) {
-      log("info", `Batch complete (${batchDeleted} deleted). Refreshing page...`);
-      seen.clear(); // Clear seen set - fresh page means fresh tweets
-      await page.reload({ waitUntil: "domcontentloaded", timeout: 30000 });
-      await page.waitForTimeout(2000);
-    }
-  }
-
-  if (totalCycles >= MAX_CYCLES) {
-    log("warn", `Reached max cycles (${MAX_CYCLES}). Stopping.`);
+    // Step 5: Brief pause for DOM to settle after batch
+    await page.waitForTimeout(500);
   }
 }
 
@@ -988,17 +925,23 @@ async function run() {
 
   let context, browser, page;
 
+  // Browser args to prevent throttling when window loses focus
+  const browserArgs = [
+    "--disable-blink-features=AutomationControlled",
+    "--disable-infobars",
+    "--disable-automation",
+    "--disable-backgrounding-occluded-windows",
+    "--disable-renderer-backgrounding",
+    "--disable-background-timer-throttling"
+  ];
+
   // Private mode: always use fresh browser (no Edge profile)
   if (PRIVATE_MODE) {
     log("info", "Using private browser mode (fresh session)");
     browser = await chromium.launch({
       headless: HEADLESS,
       channel: 'msedge',
-      args: [
-        "--disable-blink-features=AutomationControlled",
-        "--disable-infobars",
-        "--disable-automation"
-      ],
+      args: browserArgs,
       ignoreDefaultArgs: ["--enable-automation"]
     });
     // Use handle-specific storage if it exists and is valid
@@ -1021,9 +964,7 @@ async function run() {
           headless: HEADLESS,
           channel: 'msedge',
           args: [
-            "--disable-blink-features=AutomationControlled",
-            "--disable-infobars",
-            "--disable-automation",
+            ...browserArgs,
             "--no-first-run",
             "--no-default-browser-check",
             "--enable-extensions",
@@ -1040,11 +981,7 @@ async function run() {
       browser = await chromium.launch({
         headless: HEADLESS,
         channel: 'msedge',
-        args: [
-          "--disable-blink-features=AutomationControlled",
-          "--disable-infobars",
-          "--disable-automation"
-        ],
+        args: browserArgs,
         ignoreDefaultArgs: ["--enable-automation"]
       });
       const handleStorage = getStoragePath(PROFILE_HANDLE);

@@ -1018,8 +1018,8 @@
 
         <!-- Footer -->
         <div style="text-align: center; margin-top: 16px; padding-bottom: 8px;">
-          <span style="font-size: 10px; color: var(--white-20);">
-            v1.2.0 · A product of <a href="#" onclick="ipcRenderer.send('open-external', 'https://choppedonions.xyz'); return false;" style="color: var(--white-30); text-decoration: none;">ChoppedOnions.xyz</a>
+          <span id="appVersion" style="font-size: 10px; color: var(--white-20);">
+            · A product of <a href="#" onclick="ipcRenderer.send('open-external', 'https://choppedonions.xyz'); return false;" style="color: var(--white-30); text-decoration: none;">ChoppedOnions.xyz</a>
           </span>
         </div>
 
@@ -1154,6 +1154,16 @@
 
   <script>
     const { ipcRenderer } = require('electron');
+    const path = require('path');
+
+    // Auto-set version from package.json
+    try {
+      const pkg = require(path.join(__dirname, 'package.json'));
+      document.addEventListener('DOMContentLoaded', () => {
+        const versionEl = document.getElementById('appVersion');
+        if (versionEl) versionEl.innerHTML = `v${pkg.version} ` + versionEl.innerHTML;
+      });
+    } catch (e) { console.error('Could not read version:', e); }
 
     function minimizeWindow() { ipcRenderer.send('window-minimize'); }
     function maximizeWindow() { ipcRenderer.send('window-maximize'); }

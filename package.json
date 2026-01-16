@@ -1,6 +1,6 @@
 {
   "name": "deletemytweets",
-  "version": "1.2.4",
+  "version": "1.2.6",
   "description": "Date-filtered tweet deletion tool for X (Twitter). Safely delete old tweets while protecting recent ones.",
   "main": "electron-main.js",
   "bin": {
