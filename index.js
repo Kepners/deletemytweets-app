@@ -729,32 +729,50 @@ async function autoScroll(page, wantMore = 15) {
   let prevCount = await allCards(page).count();
   let lastH = await page.evaluate(() => document.documentElement.scrollHeight);
   let stale = 0;
+  let backoffMs = 1000; // Start with 1 second backoff
 
   for (let pass = 0; pass < MAX_SCROLL_PASSES; pass++) {
     const step = await page.evaluate(r => Math.max(240, Math.floor(window.innerHeight * r)), SCROLL_STEP_RATIO);
 
-    // Scroll down in chunks
-    for (let i = 0; i < 10; i++) {
+    // Scroll down in smaller chunks with longer waits (more human-like)
+    for (let i = 0; i < 5; i++) {
       await page.evaluate(px => window.scrollBy(0, px), step);
-      await page.waitForTimeout(rand(SCROLL_MIN_WAIT_MS, SCROLL_MAX_WAIT_MS));
+      await page.waitForTimeout(rand(500, 1000)); // Slower scrolling
     }
 
-    // Stop-start pattern: scroll to top briefly, then back down (forces X to reload)
-    if (pass > 0 && pass % 3 === 0) {
-      await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
-      await page.waitForTimeout(500);
-      await page.evaluate(() => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "instant" }));
-      await page.waitForTimeout(800);
+    // Every 5 passes, take a breather to let Twitter catch up
+    if (pass > 0 && pass % 5 === 0) {
+      log("info", `Pausing to let Twitter load more tweets (pass ${pass})...`);
+      await page.waitForTimeout(rand(2000, 4000)); // 2-4 second pause
     }
 
     const h = await page.evaluate(() => document.documentElement.scrollHeight);
-    stale = (h === lastH) ? stale + 1 : 0;
+    const heightChanged = h !== lastH;
+
+    if (!heightChanged) {
+      stale++;
+      // Exponential backoff when Twitter stops loading
+      log("info", `No new content, waiting ${Math.round(backoffMs/1000)}s before retry...`);
+      await page.waitForTimeout(backoffMs);
+      backoffMs = Math.min(backoffMs * 1.5, 10000); // Max 10 second backoff
+
+      // Try scrolling up then down to trigger reload
+      if (stale % 2 === 0) {
+        await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
+        await page.waitForTimeout(1500);
+        await page.evaluate(() => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "smooth" }));
+        await page.waitForTimeout(2000);
+      }
+    } else {
+      stale = 0;
+      backoffMs = 1000; // Reset backoff when content loads
+    }
     lastH = h;
 
     const now = await allCards(page).count();
     if (now - prevCount >= wantMore) break;
     prevCount = now;
-    if (stale >= 8) break; // Keep scrolling longer - Twitter loads old tweets slowly
+    if (stale >= 6) break; // Give up after 6 stale attempts with backoff
   }
   if (RETURN_TO_TOP) await page.evaluate(() => window.scrollTo({ top: 0, behavior: "smooth" }));
 }
@@ -871,6 +889,10 @@ async function processTab(page, tabName, removed, startTime) {
     let work = await collectWorklist(page, need, seen);
 
     if (!work.length) {
+      // First, scroll to TOP to check if there are tweets we missed
+      await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
+      await page.waitForTimeout(1000);
+
       const before = await allCards(page).count();
       await autoScroll(page, 12);
       const after = await allCards(page).count();
@@ -899,9 +921,17 @@ async function processTab(page, tabName, removed, startTime) {
 
     noMatchPasses = 0;
 
+    // Scroll to TOP before processing - tweets above current position need deleting
+    await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
+    await page.waitForTimeout(500);
+
     for (const card of work) {
       if (isAborted()) break;
       try {
+        // Scroll the card into view before interacting
+        await card.scrollIntoViewIfNeeded().catch(() => {});
+        await page.waitForTimeout(200);
+
         let res = await tryDelete(page, card);
         if (!res.ok) res = await tryUndoRepost(page, card);
         if (res.ok) {
