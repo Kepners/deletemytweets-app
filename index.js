@@ -1078,6 +1078,9 @@ async function run() {
   } else {
     console.log(chalk.cyan('  ℹ Finished - no more matching tweets found\n'));
   }
+
+  // Return actual deleted count for programmatic use
+  return removed.count;
 }
 
 // Wait for keypress before exiting
@@ -1143,8 +1146,7 @@ async function runCleanup(config, callbacks = {}) {
   let deletedCount = 0;
 
   try {
-    await run();
-    deletedCount = TARGET; // Will be updated properly
+    deletedCount = await run() || 0;  // Get actual deleted count from run()
   } catch (err) {
     if (!isAborted()) {
       // Only report error if not aborted
