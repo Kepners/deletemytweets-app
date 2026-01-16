@@ -845,97 +845,95 @@ async function processTab(page, tabName, removed, startTime) {
 
   await gotoProfileTab(page, tabName);
 
-  const seen = new Set();
-  let emptyPasses = 0;
-  let scrollDepth = 10;
-  let totalEmptyInARow = 0;
   let lastProgressTime = Date.now();
-  const MAX_SCROLL = 300;
-  const MAX_EMPTY_BEFORE_REFRESH = 10;  // Refresh page after this many empty passes
-  const MAX_TOTAL_EMPTY = 30;           // Give up after this many total empty passes
+  let sweepCount = 0;
+  const MAX_SWEEPS = 50;  // Max full sweeps before giving up
 
-  while (removed.count < TARGET && !isAborted()) {
-    // Periodic status update (every 5 minutes of no progress)
-    if (Date.now() - lastProgressTime > 5 * 60 * 1000) {
-      log("info", `Still running... ${removed.count}/${TARGET} deleted so far`);
-      lastProgressTime = Date.now();
+  // Outer loop: Full sweeps from top to bottom
+  while (removed.count < TARGET && !isAborted() && sweepCount < MAX_SWEEPS) {
+    sweepCount++;
+    let deletedThisSweep = 0;
+    let noLoadCount = 0;
+    const seen = new Set();  // Fresh seen set each sweep
+
+    // Go to top for each sweep
+    log("info", `Starting sweep ${sweepCount}...`);
+    await scrollToTop(page);
+    await page.waitForTimeout(1000);
+
+    // Inner loop: Scroll down page by page, deleting as we go
+    while (removed.count < TARGET && !isAborted() && noLoadCount < 10) {
+      // Periodic status update
+      if (Date.now() - lastProgressTime > 2 * 60 * 1000) {
+        log("info", `Still running... ${removed.count}/${TARGET} deleted (sweep ${sweepCount})`);
+        lastProgressTime = Date.now();
+      }
+
+      // Find deletable tweets in current view
+      const work = await collectWorklist(page, Math.min(10, TARGET - removed.count), seen);
+
+      if (work.length > 0) {
+        noLoadCount = 0;
+
+        // Delete each tweet found
+        for (const card of work) {
+          if (isAborted() || removed.count >= TARGET) break;
+
+          try {
+            await card.scrollIntoViewIfNeeded().catch(() => {});
+            await page.waitForTimeout(100);
+
+            let res = await tryDelete(page, card);
+            if (!res.ok) res = await tryUndoRepost(page, card);
+
+            if (res.ok) {
+              removed.count++;
+              deletedThisSweep++;
+              updateProgress(removed.count, tabName, TARGET);
+              lastProgressTime = Date.now();
+            }
+          } catch (e) {
+            log("error", "Delete failed (continuing)", e?.message || e);
+          }
+
+          await pause(MIN_DELAY_MS, MAX_DELAY_MS);
+        }
+
+        // Rate limit protection
+        if (removed.count % 100 === 0 && removed.count > 0) {
+          log("info", `${removed.count} deleted. Brief pause...`);
+          await page.waitForTimeout(3000);
+        }
+      }
+
+      // Scroll down to next section
+      const beforeCount = await allCards(page).count();
+      await page.evaluate(() => window.scrollBy(0, window.innerHeight * 0.8));
+      await page.waitForTimeout(600);
+      const afterCount = await allCards(page).count();
+
+      // Check if we hit the bottom (no new tweets loading)
+      if (afterCount <= beforeCount) {
+        noLoadCount++;
+      } else {
+        noLoadCount = 0;
+      }
     }
 
-    // Step 1: Always start from top
-    await scrollToTop(page);
+    log("info", `Sweep ${sweepCount} complete: ${deletedThisSweep} deleted this sweep`);
 
-    // Step 2: Scroll down to load tweets
-    await scrollToLoadTweets(page, scrollDepth);
-
-    // Step 3: Find deletable tweets
-    const work = await collectWorklist(page, Math.min(20, TARGET - removed.count), seen);
-
-    if (work.length === 0) {
-      emptyPasses++;
-      totalEmptyInARow++;
-
-      // Keep scrolling deeper
-      scrollDepth = Math.min(scrollDepth + 30, MAX_SCROLL);
-
-      if (emptyPasses >= MAX_EMPTY_BEFORE_REFRESH) {
-        // Page might be stuck - refresh and try again
-        log("info", `No tweets after ${emptyPasses} passes. Refreshing page...`);
+    // If no deletions this sweep, we might be done
+    if (deletedThisSweep === 0) {
+      // Try refreshing page once to see if more tweets appear
+      if (sweepCount % 3 === 0) {
+        log("info", "No deletions - refreshing page to check for more...");
         await page.reload({ waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
         await page.waitForTimeout(3000);
-        emptyPasses = 0;
-        scrollDepth = 10;
-        seen.clear(); // Clear seen set after refresh
-        continue;
-      }
-
-      if (totalEmptyInARow >= MAX_TOTAL_EMPTY) {
-        log("info", "No more deletable tweets after extensive searching. Done with tab.");
+      } else {
+        // Two consecutive empty sweeps = probably done
+        log("info", "No more deletable tweets found. Done with tab.");
         break;
       }
-
-      // Log progress less frequently
-      if (emptyPasses % 3 === 0) {
-        log("info", `Searching... (depth ${scrollDepth}, attempt ${totalEmptyInARow}/${MAX_TOTAL_EMPTY})`);
-      }
-      continue;
-    }
-
-    // Found tweets - reset counters but KEEP scroll depth
-    emptyPasses = 0;
-    totalEmptyInARow = 0;
-    lastProgressTime = Date.now();
-
-    // Step 4: Delete each tweet
-    for (const card of work) {
-      if (isAborted() || removed.count >= TARGET) break;
-
-      try {
-        await card.scrollIntoViewIfNeeded().catch(() => {});
-        await page.waitForTimeout(100);
-
-        let res = await tryDelete(page, card);
-        if (!res.ok) res = await tryUndoRepost(page, card);
-
-        if (res.ok) {
-          removed.count++;
-          updateProgress(removed.count, tabName, TARGET);
-          lastProgressTime = Date.now();
-        }
-      } catch (e) {
-        // Don't stop on individual errors - keep going
-        log("error", "Delete failed (continuing)", e?.message || e);
-      }
-
-      await pause(MIN_DELAY_MS, MAX_DELAY_MS);
-    }
-
-    // Brief pause for DOM to settle
-    await page.waitForTimeout(500);
-
-    // Every 100 deletions, take a longer break to avoid rate limits
-    if (removed.count % 100 === 0 && removed.count > 0) {
-      log("info", `${removed.count} deleted. Taking a short break to avoid rate limits...`);
-      await page.waitForTimeout(5000);
     }
   }
 }
