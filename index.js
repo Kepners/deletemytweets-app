@@ -876,76 +876,91 @@ async function processTab(page, tabName, removed, startTime) {
   log("info", `Date filter: DELETE tweets before ${formatDate(DELETE_BEFORE)}, PROTECT tweets after ${formatDate(PROTECT_AFTER)}`);
 
   await gotoProfileTab(page, tabName);
-  await autoScroll(page, 18);
 
   const seen = new Set();
-  let noMatchPasses = 0;
-  const MAX_NO_MATCH_PASSES = 50;  // Keep trying longer for accounts with lots of tweets
-  let refreshCount = 0;
-  const MAX_REFRESHES = 3;
+  const BATCH_SIZE = TARGET; // Delete all target tweets before refresh (user sets this via target)
+  let batchDeleted = 0;
+  let totalCycles = 0;
+  const MAX_CYCLES = 20; // Safety limit
 
-  while (removed.count < TARGET && !isAborted()) {
-    const need = TARGET - removed.count;
-    let work = await collectWorklist(page, need, seen);
+  while (removed.count < TARGET && !isAborted() && totalCycles < MAX_CYCLES) {
+    totalCycles++;
 
-    if (!work.length) {
-      // First, scroll to TOP to check if there are tweets we missed
-      await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
-      await page.waitForTimeout(1000);
+    // === PHASE 1: Load tweets by scrolling down ===
+    log("info", `Cycle ${totalCycles}: Loading tweets...`);
+    await autoScroll(page, 30); // Aggressive scroll to load lots of tweets
 
-      const before = await allCards(page).count();
-      await autoScroll(page, 12);
-      const after = await allCards(page).count();
+    // === PHASE 2: Go to top ONCE ===
+    await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
+    await page.waitForTimeout(1000);
 
-      if (after <= before) {
-        noMatchPasses++;
-        if (noMatchPasses >= MAX_NO_MATCH_PASSES) {
-          // Try refreshing the page before giving up
-          if (refreshCount < MAX_REFRESHES) {
-            refreshCount++;
-            log("info", chalk.yellow(`Refreshing page (attempt ${refreshCount}/${MAX_REFRESHES})...`));
-            await page.reload({ waitUntil: "domcontentloaded", timeout: 30000 });
-            await page.waitForTimeout(3000);
-            await autoScroll(page, 18);
-            noMatchPasses = 0; // Reset counter after refresh
-            continue;
+    // === PHASE 3: Delete from top, naturally scrolling down ===
+    batchDeleted = 0;
+    let emptyPasses = 0;
+
+    while (batchDeleted < BATCH_SIZE && removed.count < TARGET && !isAborted()) {
+      // Find ONE tweet to delete (don't grab a big batch)
+      const cards = allCards(page);
+      const n = await cards.count();
+      let foundOne = false;
+
+      for (let i = 0; i < n && !foundOne; i++) {
+        const card = cards.nth(i);
+        const key = await statusKey(card);
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+
+        // Check if this tweet should be deleted
+        if (!(await shouldDeleteByDate(card))) continue;
+        if (!(await isYours(page, card))) continue;
+
+        // Found one! Delete it
+        foundOne = true;
+        try {
+          await card.scrollIntoViewIfNeeded().catch(() => {});
+          await page.waitForTimeout(150);
+
+          let res = await tryDelete(page, card);
+          if (!res.ok) res = await tryUndoRepost(page, card);
+
+          if (res.ok) {
+            removed.count++;
+            batchDeleted++;
+            updateProgress(removed.count, tabName, TARGET);
+            emptyPasses = 0;
+
+            // Small pause, then continue (tweet disappears, next slides up)
+            await pause(MIN_DELAY_MS, MAX_DELAY_MS);
           }
-          log("info", chalk.gray(`No more matching tweets on ${tabName}`));
+        } catch (e) {
+          log("error", chalk.red("Delete failed"), e?.message || e);
+        }
+      }
+
+      if (!foundOne) {
+        emptyPasses++;
+        // Scroll down a bit to find more
+        await page.evaluate(() => window.scrollBy(0, 500));
+        await page.waitForTimeout(500);
+
+        if (emptyPasses >= 10) {
+          log("info", "No more deletable tweets in view, moving to next cycle...");
           break;
         }
-      } else {
-        noMatchPasses = 0;
       }
-      continue;
     }
 
-    noMatchPasses = 0;
-
-    // Scroll to TOP before processing - tweets above current position need deleting
-    await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
-    await page.waitForTimeout(500);
-
-    for (const card of work) {
-      if (isAborted()) break;
-      try {
-        // Scroll the card into view before interacting
-        await card.scrollIntoViewIfNeeded().catch(() => {});
-        await page.waitForTimeout(200);
-
-        let res = await tryDelete(page, card);
-        if (!res.ok) res = await tryUndoRepost(page, card);
-        if (res.ok) {
-          removed.count++;
-          updateProgress(removed.count, tabName, TARGET);
-        }
-      } catch (e) {
-        log("error", chalk.red("Action failed"), e?.message || e);
-      }
-      await pause(MIN_DELAY_MS, MAX_DELAY_MS);
-      if (removed.count >= TARGET) break;
+    // === PHASE 4: After batch, hard refresh to load fresh tweets ===
+    if (removed.count < TARGET && !isAborted()) {
+      log("info", `Batch complete (${batchDeleted} deleted). Refreshing page...`);
+      seen.clear(); // Clear seen set - fresh page means fresh tweets
+      await page.reload({ waitUntil: "domcontentloaded", timeout: 30000 });
+      await page.waitForTimeout(2000);
     }
+  }
 
-    if (removed.count < TARGET && !isAborted()) await autoScroll(page, 10);
+  if (totalCycles >= MAX_CYCLES) {
+    log("warn", `Reached max cycles (${MAX_CYCLES}). Stopping.`);
   }
 }
 
