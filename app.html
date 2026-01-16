@@ -938,7 +938,7 @@
         <div class="glass-card">
           <div class="card-row">
             <span class="card-label">Target tweets</span>
-            <input type="number" class="num-input" id="target" value="200">
+            <input type="number" class="num-input" id="target" value="10000">
           </div>
           <div class="card-row">
             <span class="card-label">Speed</span>
@@ -1171,7 +1171,7 @@
 
     let config = {
       handle: '', posts: true, replies: true, reposts: false,
-      speed: 'normal', headless: false, target: 200,
+      speed: 'normal', headless: false, target: 10000,
       deleteMonth: 12, deleteYear: 2014,
       protectMonth: new Date().getMonth() + 1, // Current month (1-12)
       protectYear: new Date().getFullYear(),
@@ -1583,7 +1583,7 @@
 
     // Save target when changed
     document.getElementById('target').addEventListener('change', (e) => {
-      config.target = parseInt(e.target.value) || 200;
+      config.target = parseInt(e.target.value) || 10000;
       ipcRenderer.send('save-config', config);
     });
 
@@ -1805,7 +1805,7 @@
         return;
       }
 
-      config.target = parseInt(document.getElementById('target').value) || 200;
+      config.target = parseInt(document.getElementById('target').value) || 10000;
       config.deleteMonth = parseInt(document.getElementById('deleteMonth').value);
       config.deleteYear = parseInt(document.getElementById('deleteYear').value);
       config.protectMonth = parseInt(document.getElementById('protectMonth').value);

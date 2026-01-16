@@ -233,7 +233,7 @@ function stopProgress() {
 
 // ================= CONFIG FILE =================
 const CONFIG_FILE = path.resolve(__dirname, "deletemytweets_config.json");
-const SESSION_EXPIRY_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+const SESSION_EXPIRY_MS = 90 * 24 * 60 * 60 * 1000; // 90 days (long sessions for all-day runs)
 
 function loadConfig() {
   try {
@@ -313,7 +313,7 @@ let PROFILE_HANDLE = null;
 let INCLUDE_POSTS = true;
 let INCLUDE_REPLIES = true;
 let HANDLE_REPOSTS = false;
-let TARGET = 200;
+let TARGET = 10000;  // Default to large batch for "set and forget" usage
 let HEADLESS = false;
 let PRIVATE_MODE = false;  // Use fresh browser instead of Edge profile
 let SPEED = "normal";
@@ -847,10 +847,20 @@ async function processTab(page, tabName, removed, startTime) {
 
   const seen = new Set();
   let emptyPasses = 0;
-  let scrollDepth = 10; // Start moderate, go deeper if needed
-  const MAX_SCROLL = 300; // Much higher for large accounts (31K+ tweets)
+  let scrollDepth = 10;
+  let totalEmptyInARow = 0;
+  let lastProgressTime = Date.now();
+  const MAX_SCROLL = 300;
+  const MAX_EMPTY_BEFORE_REFRESH = 10;  // Refresh page after this many empty passes
+  const MAX_TOTAL_EMPTY = 30;           // Give up after this many total empty passes
 
   while (removed.count < TARGET && !isAborted()) {
+    // Periodic status update (every 5 minutes of no progress)
+    if (Date.now() - lastProgressTime > 5 * 60 * 1000) {
+      log("info", `Still running... ${removed.count}/${TARGET} deleted so far`);
+      lastProgressTime = Date.now();
+    }
+
     // Step 1: Always start from top
     await scrollToTop(page);
 
@@ -862,49 +872,71 @@ async function processTab(page, tabName, removed, startTime) {
 
     if (work.length === 0) {
       emptyPasses++;
+      totalEmptyInARow++;
 
-      // Keep scrolling deeper - large accounts need LOTS of scrolling
+      // Keep scrolling deeper
       scrollDepth = Math.min(scrollDepth + 30, MAX_SCROLL);
-      log("info", `No tweets found, scrolling deeper (${scrollDepth} passes)...`);
 
-      if (emptyPasses >= 6) {
-        log("info", "No more deletable tweets after extensive scrolling. Done with tab.");
+      if (emptyPasses >= MAX_EMPTY_BEFORE_REFRESH) {
+        // Page might be stuck - refresh and try again
+        log("info", `No tweets after ${emptyPasses} passes. Refreshing page...`);
+        await page.reload({ waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
+        await page.waitForTimeout(3000);
+        emptyPasses = 0;
+        scrollDepth = 10;
+        seen.clear(); // Clear seen set after refresh
+        continue;
+      }
+
+      if (totalEmptyInARow >= MAX_TOTAL_EMPTY) {
+        log("info", "No more deletable tweets after extensive searching. Done with tab.");
         break;
+      }
+
+      // Log progress less frequently
+      if (emptyPasses % 3 === 0) {
+        log("info", `Searching... (depth ${scrollDepth}, attempt ${totalEmptyInARow}/${MAX_TOTAL_EMPTY})`);
       }
       continue;
     }
 
-    // Found tweets - reset empty counter but KEEP scroll depth
-    // (old tweets are at this depth, don't go back to shallow)
+    // Found tweets - reset counters but KEEP scroll depth
     emptyPasses = 0;
+    totalEmptyInARow = 0;
+    lastProgressTime = Date.now();
 
     // Step 4: Delete each tweet
     for (const card of work) {
       if (isAborted() || removed.count >= TARGET) break;
 
       try {
-        // Scroll tweet into view
         await card.scrollIntoViewIfNeeded().catch(() => {});
         await page.waitForTimeout(100);
 
-        // Try to delete
         let res = await tryDelete(page, card);
         if (!res.ok) res = await tryUndoRepost(page, card);
 
         if (res.ok) {
           removed.count++;
           updateProgress(removed.count, tabName, TARGET);
+          lastProgressTime = Date.now();
         }
       } catch (e) {
-        log("error", "Delete failed", e?.message || e);
+        // Don't stop on individual errors - keep going
+        log("error", "Delete failed (continuing)", e?.message || e);
       }
 
-      // Delay between deletions
       await pause(MIN_DELAY_MS, MAX_DELAY_MS);
     }
 
-    // Step 5: Brief pause for DOM to settle after batch
+    // Brief pause for DOM to settle
     await page.waitForTimeout(500);
+
+    // Every 100 deletions, take a longer break to avoid rate limits
+    if (removed.count % 100 === 0 && removed.count > 0) {
+      log("info", `${removed.count} deleted. Taking a short break to avoid rate limits...`);
+      await page.waitForTimeout(5000);
+    }
   }
 }
 
@@ -1084,7 +1116,7 @@ async function runCleanup(config, callbacks = {}) {
 
   // Set config variables from passed config
   PROFILE_HANDLE = config.handle;
-  TARGET = config.target || 200;
+  TARGET = config.target || 10000;
   DELETE_MONTH = config.deleteMonth || 12;
   DELETE_YEAR = config.deleteYear || 2014;
   PROTECT_MONTH = config.protectMonth || 1;
