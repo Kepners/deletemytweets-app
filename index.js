@@ -321,9 +321,9 @@ let MIN_DELAY_MS = 1200;
 let MAX_DELAY_MS = 2200;
 let LOGIN_WAIT_MS = 3 * 60 * 1000;
 let STORAGE = path.resolve(__dirname, "x_auth_storage.json");
-let MAX_SCROLL_PASSES = 8;
-let SCROLL_MIN_WAIT_MS = 300;
-let SCROLL_MAX_WAIT_MS = 600;
+let MAX_SCROLL_PASSES = 100;  // Increased for large accounts (31K+ tweets)
+let SCROLL_MIN_WAIT_MS = 200;
+let SCROLL_MAX_WAIT_MS = 400;
 let SCROLL_STEP_RATIO = 0.92;
 let RETURN_TO_TOP = false;
 let DELETE_MONTH = 12;
@@ -754,7 +754,7 @@ async function autoScroll(page, wantMore = 15) {
     const now = await allCards(page).count();
     if (now - prevCount >= wantMore) break;
     prevCount = now;
-    if (stale >= 3) break; // Increased from 2 to 3
+    if (stale >= 8) break; // Keep scrolling longer - Twitter loads old tweets slowly
   }
   if (RETURN_TO_TOP) await page.evaluate(() => window.scrollTo({ top: 0, behavior: "smooth" }));
 }
@@ -830,6 +830,7 @@ async function tryUndoRepost(page, card) {
 async function collectWorklist(page, want, seen) {
   const cards = allCards(page);
   const n = await cards.count();
+  log("info", `Found ${n} tweet cards on page, checking dates...`);
   const mine = [];
   for (let i = 0; i < n && mine.length < want; i++) {
     const card = cards.nth(i);
@@ -854,13 +855,14 @@ async function collectWorklist(page, want, seen) {
 async function processTab(page, tabName, removed, startTime) {
   console.log("");
   log("tab", chalk.magenta.bold(`Processing ${tabName}`));
+  log("info", `Date filter: DELETE tweets before ${formatDate(DELETE_BEFORE)}, PROTECT tweets after ${formatDate(PROTECT_AFTER)}`);
 
   await gotoProfileTab(page, tabName);
   await autoScroll(page, 18);
 
   const seen = new Set();
   let noMatchPasses = 0;
-  const MAX_NO_MATCH_PASSES = 25;
+  const MAX_NO_MATCH_PASSES = 50;  // Keep trying longer for accounts with lots of tweets
   let refreshCount = 0;
   const MAX_REFRESHES = 3;
 
@@ -1021,8 +1023,9 @@ async function run() {
   }
 
   const tabs = [];
-  if (INCLUDE_POSTS) tabs.push("Posts");
+  // Process Replies FIRST - old tweets are usually on /with_replies page
   if (INCLUDE_REPLIES) tabs.push("Replies");
+  if (INCLUDE_POSTS) tabs.push("Posts");
 
   if (tabs.length === 0) {
     log("warn", chalk.yellow("Nothing to do - both Posts and Replies are disabled"));
