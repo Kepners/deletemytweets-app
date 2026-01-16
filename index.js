@@ -727,9 +727,16 @@ async function isYours(page, card) {
 
 // Scroll down to load more tweets
 async function scrollToLoadTweets(page, passes = 5) {
+  // Faster scrolling for deep passes, slower for shallow (to let content load)
+  const delay = passes > 50 ? 300 : passes > 20 ? 400 : 500;
+
   for (let i = 0; i < passes; i++) {
-    await page.evaluate(() => window.scrollBy(0, window.innerHeight * 0.8));
-    await page.waitForTimeout(600);
+    if (i % 50 === 0 && i > 0) {
+      // Brief pause every 50 scrolls to let Twitter catch up
+      await page.waitForTimeout(1000);
+    }
+    await page.evaluate(() => window.scrollBy(0, window.innerHeight));
+    await page.waitForTimeout(delay);
   }
 }
 
@@ -840,7 +847,8 @@ async function processTab(page, tabName, removed, startTime) {
 
   const seen = new Set();
   let emptyPasses = 0;
-  let scrollDepth = 5; // Start shallow, go deeper if needed
+  let scrollDepth = 10; // Start moderate, go deeper if needed
+  const MAX_SCROLL = 300; // Much higher for large accounts (31K+ tweets)
 
   while (removed.count < TARGET && !isAborted()) {
     // Step 1: Always start from top
@@ -855,21 +863,20 @@ async function processTab(page, tabName, removed, startTime) {
     if (work.length === 0) {
       emptyPasses++;
 
-      if (emptyPasses <= 3) {
-        // Try scrolling deeper to find older tweets
-        scrollDepth = Math.min(scrollDepth + 10, 50);
-        log("info", `No tweets found, scrolling deeper (${scrollDepth} passes)...`);
-        continue;
-      }
+      // Keep scrolling deeper - large accounts need LOTS of scrolling
+      scrollDepth = Math.min(scrollDepth + 30, MAX_SCROLL);
+      log("info", `No tweets found, scrolling deeper (${scrollDepth} passes)...`);
 
-      // Really nothing left
-      log("info", "No more deletable tweets found. Done with tab.");
-      break;
+      if (emptyPasses >= 6) {
+        log("info", "No more deletable tweets after extensive scrolling. Done with tab.");
+        break;
+      }
+      continue;
     }
 
-    // Found tweets - reset counters
+    // Found tweets - reset empty counter but KEEP scroll depth
+    // (old tweets are at this depth, don't go back to shallow)
     emptyPasses = 0;
-    scrollDepth = 5;
 
     // Step 4: Delete each tweet
     for (const card of work) {
