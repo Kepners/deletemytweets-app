@@ -69,6 +69,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // ═══════════════════════════════════════════════════════════
   startCleanup: (config) => ipcRenderer.send('start-cleanup', config),
   stopCleanup: () => ipcRenderer.send('stop-cleanup'),
+  runInTerminal: (config) => ipcRenderer.send('run-in-terminal', config),
+  onTerminalLaunched: (callback) => {
+    ipcRenderer.on('terminal-launched', (event, data) => callback(data));
+  },
+  onTerminalError: (callback) => {
+    ipcRenderer.on('terminal-error', (event, data) => callback(data));
+  },
   onCleanupProgress: (callback) => {
     ipcRenderer.on('cleanup-progress', (event, data) => callback(data));
   },

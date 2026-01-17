@@ -335,7 +335,8 @@ let PROTECT_AFTER = null;
 
 // Parse config from environment (CLI mode only)
 function parseEnvConfig() {
-  PROFILE_HANDLE = process.env.PROFILE_HANDLE || process.argv[2] || savedConfig.handle;
+  // Support DMT_* env vars from Electron app, plus legacy names
+  PROFILE_HANDLE = process.env.DMT_HANDLE || process.env.PROFILE_HANDLE || process.argv[2] || savedConfig.handle;
 
   if (!PROFILE_HANDLE) {
     printHeader();
@@ -366,13 +367,14 @@ function parseEnvConfig() {
     saveConfig({ ...savedConfig, handle: PROFILE_HANDLE });
   }
 
-  INCLUDE_POSTS = (process.env.INCLUDE_POSTS ?? "true") === "true";
-  INCLUDE_REPLIES = (process.env.INCLUDE_REPLIES ?? "true") === "true";
-  HANDLE_REPOSTS = (process.env.HANDLE_REPOSTS ?? "false") === "true";
+  INCLUDE_POSTS = (process.env.DMT_POSTS ?? process.env.INCLUDE_POSTS ?? "true") === "true";
+  INCLUDE_REPLIES = (process.env.DMT_REPLIES ?? process.env.INCLUDE_REPLIES ?? "true") === "true";
+  HANDLE_REPOSTS = (process.env.DMT_REPOSTS ?? process.env.HANDLE_REPOSTS ?? "false") === "true";
 
-  TARGET = parseInt(process.env.TARGET ?? "200", 10);
-  HEADLESS = (process.env.HEADLESS ?? "false") === "true";
-  SPEED = process.env.SPEED ?? "normal";
+  TARGET = parseInt(process.env.DMT_TARGET ?? process.env.TARGET ?? "10000", 10);
+  HEADLESS = (process.env.DMT_HEADLESS ?? process.env.HEADLESS ?? "false") === "true";
+  PRIVATE_MODE = (process.env.DMT_PRIVATE_MODE ?? process.env.PRIVATE_MODE ?? "false") === "true";
+  SPEED = process.env.DMT_SPEED ?? process.env.SPEED ?? "normal";
 
   const delays = SPEED_PRESETS[SPEED] || SPEED_PRESETS.normal;
   MIN_DELAY_MS = parseInt(process.env.MIN_DELAY_MS ?? String(delays.min), 10);
@@ -387,10 +389,10 @@ function parseEnvConfig() {
   SCROLL_STEP_RATIO = parseFloat(process.env.SCROLL_STEP_RATIO ?? "0.92");
   RETURN_TO_TOP = (process.env.RETURN_TO_TOP ?? "false") === "true";
 
-  DELETE_MONTH = parseInt(process.env.DELETE_MONTH ?? "12", 10);
-  DELETE_YEAR = parseInt(process.env.DELETE_YEAR ?? process.env.DELETE_YEAR_AND_OLDER ?? "2014", 10);
-  PROTECT_MONTH = parseInt(process.env.PROTECT_MONTH ?? "01", 10);
-  PROTECT_YEAR = parseInt(process.env.PROTECT_YEAR ?? process.env.PROTECT_YEAR_AND_NEWER ?? "2025", 10);
+  DELETE_MONTH = parseInt(process.env.DMT_DELETE_MONTH ?? process.env.DELETE_MONTH ?? "12", 10);
+  DELETE_YEAR = parseInt(process.env.DMT_DELETE_YEAR ?? process.env.DELETE_YEAR ?? process.env.DELETE_YEAR_AND_OLDER ?? "2014", 10);
+  PROTECT_MONTH = parseInt(process.env.DMT_PROTECT_MONTH ?? process.env.PROTECT_MONTH ?? "01", 10);
+  PROTECT_YEAR = parseInt(process.env.DMT_PROTECT_YEAR ?? process.env.PROTECT_YEAR ?? process.env.PROTECT_YEAR_AND_NEWER ?? "2025", 10);
 
   DELETE_BEFORE = new Date(DELETE_YEAR, DELETE_MONTH - 1, 1);
   PROTECT_AFTER = new Date(PROTECT_YEAR, PROTECT_MONTH - 1, 1);

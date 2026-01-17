@@ -4,8 +4,6 @@ const path = require('path');
 // Keep a global reference of the window object
 let mainWindow;
 let isCleanupRunning = false;
-let runCleanup = null; // Lazy-load to avoid conflicts with Electron init
-let abortCleanup = null; // Function to abort running cleanup
 
 function createWindow() {
   // Create the browser window
@@ -74,8 +72,10 @@ ipcMain.on('window-close', () => {
   mainWindow?.close();
 });
 
-// Handle cleanup process - runs directly in Electron (no Node.js dependency!)
-// Track stats for progress updates
+// Handle cleanup process - spawns CLI as child process (like running in CMD!)
+// This avoids Playwright conflicts with Electron's Chromium
+const { spawn } = require('child_process');
+let cleanupProcess = null;
 let cleanupStats = { deleted: 0, protected: 0, skipped: 0, scanned: 0 };
 
 ipcMain.on('start-cleanup', async (event, config) => {
@@ -91,104 +91,153 @@ ipcMain.on('start-cleanup', async (event, config) => {
     return;
   }
 
-  // Set environment variable so index.js can find session files
-  process.env.ELECTRON_USER_DATA = app.getPath('userData');
-
-  // Lazy-load the cleanup module (avoids conflicts during Electron init)
-  if (!runCleanup) {
-    try {
-      const cleanup = require('./index.js');
-      runCleanup = cleanup.runCleanup;
-      abortCleanup = cleanup.abortCleanup;
-    } catch (err) {
-      event.reply('cleanup-error', `Failed to load cleanup module: ${err.message}`);
-      return;
-    }
-  }
-
   isCleanupRunning = true;
   cleanupStats = { deleted: 0, protected: 0, skipped: 0, scanned: 0 };
-  mainWindow?.webContents.send('cleanup-log', { type: 'info', message: 'Starting cleanup...' });
-  event.reply('cleanup-started');
-
   const targetCount = parseInt(config.target, 10);
 
-  try {
-    await runCleanup(
-      {
-        handle: config.handle,
-        target: targetCount,
-        deleteMonth: parseInt(config.deleteMonth, 10),
-        deleteYear: parseInt(config.deleteYear, 10),
-        protectMonth: parseInt(config.protectMonth, 10),
-        protectYear: parseInt(config.protectYear, 10),
-        posts: config.posts,
-        replies: config.replies,
-        reposts: config.reposts,
-        speed: config.speed,
-        headless: config.headless,  // false = show browser, true = headless
-        privateMode: config.privateMode  // true = use fresh browser, false = use Edge profile
-      },
-      {
-        onProgress: ({ current, total, tab }) => {
-          cleanupStats.scanned = current;
-          // Send progress with all stats app.html expects
-          mainWindow?.webContents.send('cleanup-progress', {
-            scanned: current,
-            target: targetCount,
-            deleted: cleanupStats.deleted,
-            protected: cleanupStats.protected,
-            skipped: cleanupStats.skipped
-          });
-        },
-        onLog: ({ type, message }) => {
-          // Use log type to track stats (more reliable than parsing message text)
-          let statsChanged = false;
-          if (type === 'delete') {
-            cleanupStats.deleted++;
-            statsChanged = true;
-          } else if (type === 'protect') {
-            cleanupStats.protected++;
-            statsChanged = true;
-          } else if (type === 'skip') {
-            cleanupStats.skipped++;
-            statsChanged = true;
-          }
-          mainWindow?.webContents.send('cleanup-log', { type, message });
+  mainWindow?.webContents.send('cleanup-log', { type: 'info', message: 'Starting cleanup (CLI mode)...' });
+  event.reply('cleanup-started');
 
-          // Send updated stats to UI immediately after deletion/protection/skip
-          if (statsChanged) {
-            mainWindow?.webContents.send('cleanup-progress', {
-              scanned: cleanupStats.scanned,
-              target: targetCount,
-              deleted: cleanupStats.deleted,
-              protected: cleanupStats.protected,
-              skipped: cleanupStats.skipped
-            });
-          }
-        },
-        onComplete: ({ deleted, target, elapsed }) => {
-          cleanupStats.deleted = deleted;
-          mainWindow?.webContents.send('cleanup-log', { type: 'success', message: `Completed: ${deleted}/${target} tweets deleted in ${elapsed}s` });
-        }
+  // Build environment variables for the CLI
+  const env = {
+    ...process.env,
+    DMT_HANDLE: config.handle,
+    DMT_TARGET: config.target.toString(),
+    DMT_DELETE_MONTH: config.deleteMonth.toString(),
+    DMT_DELETE_YEAR: config.deleteYear.toString(),
+    DMT_PROTECT_MONTH: config.protectMonth.toString(),
+    DMT_PROTECT_YEAR: config.protectYear.toString(),
+    DMT_POSTS: config.posts ? 'true' : 'false',
+    DMT_REPLIES: config.replies ? 'true' : 'false',
+    DMT_REPOSTS: config.reposts ? 'true' : 'false',
+    DMT_SPEED: config.speed || 'normal',
+    DMT_HEADLESS: config.headless ? 'true' : 'false',
+    DMT_PRIVATE_MODE: config.privateMode ? 'true' : 'false',
+    ELECTRON_USER_DATA: app.getPath('userData'),
+    // Force colors in output
+    FORCE_COLOR: '1'
+  };
+
+  // Spawn node index.js as separate process
+  const indexPath = path.join(__dirname, 'index.js');
+  cleanupProcess = spawn('node', [indexPath], {
+    env,
+    cwd: __dirname,
+    stdio: ['ignore', 'pipe', 'pipe']  // Pipe stdout and stderr
+  });
+
+  // Parse output and send to UI
+  const parseAndSend = (data) => {
+    const lines = data.toString().split('\n').filter(l => l.trim());
+    for (const line of lines) {
+      // Strip ANSI color codes for parsing
+      const clean = line.replace(/\x1b\[[0-9;]*m/g, '');
+
+      // Detect log type from content
+      let type = 'info';
+      if (clean.includes('✗') || clean.includes('DELETED') || clean.includes('deleted')) {
+        type = 'delete';
+        cleanupStats.deleted++;
+      } else if (clean.includes('🛡') || clean.includes('PROTECTED') || clean.includes('protected')) {
+        type = 'protect';
+        cleanupStats.protected++;
+      } else if (clean.includes('⊘') || clean.includes('SKIPPED') || clean.includes('skipped')) {
+        type = 'skip';
+        cleanupStats.skipped++;
+      } else if (clean.includes('ERROR') || clean.includes('Error') || clean.includes('error')) {
+        type = 'error';
+      } else if (clean.includes('✓') || clean.includes('SUCCESS') || clean.includes('Completed')) {
+        type = 'success';
       }
-    );
 
+      mainWindow?.webContents.send('cleanup-log', { type, message: clean });
+
+      // Update progress
+      mainWindow?.webContents.send('cleanup-progress', {
+        scanned: cleanupStats.deleted + cleanupStats.protected + cleanupStats.skipped,
+        target: targetCount,
+        deleted: cleanupStats.deleted,
+        protected: cleanupStats.protected,
+        skipped: cleanupStats.skipped
+      });
+    }
+  };
+
+  cleanupProcess.stdout.on('data', parseAndSend);
+  cleanupProcess.stderr.on('data', parseAndSend);
+
+  cleanupProcess.on('close', (code) => {
     isCleanupRunning = false;
+    cleanupProcess = null;
+    mainWindow?.webContents.send('cleanup-log', {
+      type: code === 0 ? 'success' : 'info',
+      message: `Process exited (code ${code})`
+    });
     mainWindow?.webContents.send('cleanup-complete');
-  } catch (err) {
+  });
+
+  cleanupProcess.on('error', (err) => {
     isCleanupRunning = false;
-    mainWindow?.webContents.send('cleanup-log', { type: 'error', message: err.message || String(err) });
+    cleanupProcess = null;
+    mainWindow?.webContents.send('cleanup-log', { type: 'error', message: err.message });
     mainWindow?.webContents.send('cleanup-complete');
-  }
+  });
 });
 
 ipcMain.on('stop-cleanup', () => {
-  if (abortCleanup) {
-    abortCleanup();
+  if (cleanupProcess) {
+    cleanupProcess.kill('SIGTERM');
     mainWindow?.webContents.send('cleanup-log', { type: 'info', message: 'Stopping cleanup...' });
   }
   isCleanupRunning = false;
+});
+
+// ═══════════════════════════════════════════════════════════
+// RUN IN TERMINAL - Launches CLI in separate CMD window
+// This is more reliable than running inside Electron
+// ═══════════════════════════════════════════════════════════
+ipcMain.on('run-in-terminal', async (event, config) => {
+  // Validate license first
+  const license = getLicenseData();
+  if (!license || !license.licenseKey || !validateLicenseFormat(license.licenseKey)) {
+    event.reply('terminal-error', 'No valid license found. Please activate a license first.');
+    return;
+  }
+
+  const { spawn } = require('child_process');
+
+  // Build environment variables for the CLI
+  const env = {
+    ...process.env,
+    DMT_HANDLE: config.handle,
+    DMT_TARGET: config.target.toString(),
+    DMT_DELETE_MONTH: config.deleteMonth.toString(),
+    DMT_DELETE_YEAR: config.deleteYear.toString(),
+    DMT_PROTECT_MONTH: config.protectMonth.toString(),
+    DMT_PROTECT_YEAR: config.protectYear.toString(),
+    DMT_POSTS: config.posts ? 'true' : 'false',
+    DMT_REPLIES: config.replies ? 'true' : 'false',
+    DMT_REPOSTS: config.reposts ? 'true' : 'false',
+    DMT_SPEED: config.speed || 'normal',
+    DMT_HEADLESS: config.headless ? 'true' : 'false',
+    DMT_PRIVATE_MODE: config.privateMode ? 'true' : 'false'
+  };
+
+  // Get path to index.js (in app directory)
+  const indexPath = path.join(__dirname, 'index.js');
+
+  // Launch CMD with node index.js
+  // /K keeps window open after completion
+  const cmd = spawn('cmd.exe', ['/K', 'node', indexPath], {
+    env,
+    cwd: __dirname,
+    detached: true,  // Run independently of Electron
+    stdio: 'ignore'  // Don't pipe stdio
+  });
+
+  cmd.unref();  // Allow Electron to close without waiting for CMD
+
+  event.reply('terminal-launched', 'CLI launched in terminal window');
 });
 
 // Config storage - persist between sessions
