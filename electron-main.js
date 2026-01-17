@@ -118,16 +118,32 @@ ipcMain.on('start-cleanup', async (event, config) => {
     FORCE_COLOR: '1'
   };
 
-  // Spawn using Electron's built-in Node runtime
-  const indexPath = path.join(__dirname, 'index.js');
+  // Get correct path to index.js for both dev and packaged modes
+  // In packaged apps, index.js is unpacked to: resources/app.asar.unpacked/
+  let indexPath, workingDir;
+  if (app.isPackaged) {
+    indexPath = path.join(process.resourcesPath, 'app.asar.unpacked', 'index.js');
+    workingDir = path.join(process.resourcesPath, 'app.asar.unpacked');
+  } else {
+    indexPath = path.join(__dirname, 'index.js');
+    workingDir = __dirname;
+  }
+
+  mainWindow?.webContents.send('cleanup-log', { type: 'info', message: `CLI path: ${indexPath}` });
 
   // Use Electron's executable as Node with ELECTRON_RUN_AS_NODE=1
+  // NODE_PATH points to node_modules inside the asar archive
+  const nodeModulesPath = app.isPackaged
+    ? path.join(process.resourcesPath, 'app.asar', 'node_modules')
+    : path.join(__dirname, 'node_modules');
+
   cleanupProcess = spawn(process.execPath, [indexPath], {
     env: {
       ...env,
-      ELECTRON_RUN_AS_NODE: '1'  // Makes Electron act as Node.js
+      ELECTRON_RUN_AS_NODE: '1',  // Makes Electron act as Node.js
+      NODE_PATH: nodeModulesPath   // Tell Node where to find modules
     },
-    cwd: __dirname,
+    cwd: workingDir,
     stdio: ['ignore', 'pipe', 'pipe']  // Pipe stdout and stderr
   });
 
@@ -228,16 +244,32 @@ ipcMain.on('run-in-terminal', async (event, config) => {
     DMT_PRIVATE_MODE: config.privateMode ? 'true' : 'false'
   };
 
-  // Get path to index.js (in app directory)
-  const indexPath = path.join(__dirname, 'index.js');
+  // Get correct path to index.js for both dev and packaged modes
+  let indexPath, workingDir;
+  if (app.isPackaged) {
+    indexPath = path.join(process.resourcesPath, 'app.asar.unpacked', 'index.js');
+    workingDir = path.join(process.resourcesPath, 'app.asar.unpacked');
+  } else {
+    indexPath = path.join(__dirname, 'index.js');
+    workingDir = __dirname;
+  }
 
-  // Launch CMD with node index.js
+  // NODE_PATH points to node_modules inside the asar archive
+  const nodeModulesPath = app.isPackaged
+    ? path.join(process.resourcesPath, 'app.asar', 'node_modules')
+    : path.join(__dirname, 'node_modules');
+
+  // Launch CMD with Electron as Node (ELECTRON_RUN_AS_NODE)
   // /K keeps window open after completion
-  const cmd = spawn('cmd.exe', ['/K', 'node', indexPath], {
-    env,
-    cwd: __dirname,
+  const cmd = spawn('cmd.exe', ['/K', `set ELECTRON_RUN_AS_NODE=1 && set NODE_PATH=${nodeModulesPath} && "${process.execPath}" "${indexPath}"`], {
+    env: {
+      ...env,
+      NODE_PATH: nodeModulesPath
+    },
+    cwd: workingDir,
     detached: true,  // Run independently of Electron
-    stdio: 'ignore'  // Don't pipe stdio
+    stdio: 'ignore',  // Don't pipe stdio
+    shell: true
   });
 
   cmd.unref();  // Allow Electron to close without waiting for CMD

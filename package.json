@@ -1,6 +1,6 @@
 {
   "name": "deletemytweets",
-  "version": "1.3.10",
+  "version": "1.3.14",
   "description": "Date-filtered tweet deletion tool for X (Twitter). Safely delete old tweets while protecting recent ones.",
   "main": "electron-main.js",
   "bin": {
@@ -63,6 +63,10 @@
   "build": {
     "appId": "com.choppedonions.deletemytweets",
     "productName": "Delete My Tweets",
+    "asar": true,
+    "asarUnpack": [
+      "index.js"
+    ],
     "win": {
       "target": [
         "portable",

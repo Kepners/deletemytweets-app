@@ -874,6 +874,10 @@ async function processTab(page, tabName, removed, startTime) {
       // Find deletable tweets in current view
       const work = await collectWorklist(page, Math.min(10, TARGET - removed.count), seen);
 
+      // Debug: show what we found
+      const totalCards = await allCards(page).count();
+      log("info", `Found ${work.length} deletable of ${totalCards} total cards (${seen.size} scanned)`);
+
       if (work.length > 0) {
         noLoadCount = 0;
 
@@ -908,15 +912,24 @@ async function processTab(page, tabName, removed, startTime) {
         }
       }
 
-      // Scroll down to next section
+      // Scroll down to load more tweets - use multiple methods for reliability
       const beforeCount = await allCards(page).count();
-      await page.evaluate(() => window.scrollBy(0, window.innerHeight * 0.8));
-      await page.waitForTimeout(600);
+
+      // Method 1: Scroll via keyboard (most reliable for infinite scroll)
+      await page.keyboard.press('End');
+      await page.waitForTimeout(500);
+      await page.keyboard.press('PageDown');
+      await page.waitForTimeout(500);
+      await page.keyboard.press('PageDown');
+      await page.waitForTimeout(1000);
+
       const afterCount = await allCards(page).count();
+      console.log(`[SCROLL] ${beforeCount} → ${afterCount} cards loaded`);
 
       // Check if we hit the bottom (no new tweets loading)
       if (afterCount <= beforeCount) {
         noLoadCount++;
+        console.log(`[SCROLL] No new content (attempt ${noLoadCount}/10)`);
       } else {
         noLoadCount = 0;
       }
