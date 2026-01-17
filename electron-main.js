@@ -118,10 +118,15 @@ ipcMain.on('start-cleanup', async (event, config) => {
     FORCE_COLOR: '1'
   };
 
-  // Spawn node index.js as separate process
+  // Spawn using Electron's built-in Node runtime
   const indexPath = path.join(__dirname, 'index.js');
-  cleanupProcess = spawn('node', [indexPath], {
-    env,
+
+  // Use Electron's executable as Node with ELECTRON_RUN_AS_NODE=1
+  cleanupProcess = spawn(process.execPath, [indexPath], {
+    env: {
+      ...env,
+      ELECTRON_RUN_AS_NODE: '1'  // Makes Electron act as Node.js
+    },
     cwd: __dirname,
     stdio: ['ignore', 'pipe', 'pipe']  // Pipe stdout and stderr
   });
