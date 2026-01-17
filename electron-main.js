@@ -19,8 +19,9 @@ function createWindow() {
     transparent: true,
     backgroundColor: '#00000000',
     webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false
+      nodeIntegration: false,      // SECURITY: Disabled for safety
+      contextIsolation: true,      // SECURITY: Isolate renderer from Node.js
+      preload: path.join(__dirname, 'preload.js')  // Secure IPC bridge
     },
     resizable: true,
     show: false // Don't show until ready

@@ -5,7 +5,36 @@
 
 const fs = require("fs");
 const path = require("path");
-const { chromium } = require("playwright");
+const { chromium, firefox } = require("playwright");
+
+// ================= ANTI-DETECTION CONFIG =================
+// Random user agents (real Firefox on Windows)
+const USER_AGENTS = [
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0",
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0",
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0",
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0",
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+];
+
+// Random viewport sizes (common desktop resolutions)
+const VIEWPORTS = [
+  { width: 1920, height: 1080 },
+  { width: 1536, height: 864 },
+  { width: 1440, height: 900 },
+  { width: 1366, height: 768 },
+  { width: 1280, height: 800 },
+  { width: 1280, height: 720 },
+];
+
+function getRandomUserAgent() {
+  return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
+}
+
+function getRandomViewport() {
+  return VIEWPORTS[Math.floor(Math.random() * VIEWPORTS.length)];
+}
 
 // Check if running in CLI mode (not embedded in Electron)
 const IS_CLI = require.main === module;
@@ -316,6 +345,8 @@ let HANDLE_REPOSTS = false;
 let TARGET = 10000;  // Default to large batch for "set and forget" usage
 let HEADLESS = false;
 let PRIVATE_MODE = false;  // Use fresh browser instead of Edge profile
+let USE_FIREFOX = true;    // Use Firefox instead of Edge (better anti-detection)
+let PROXY_SERVER = null;   // Optional proxy: "host:port" or "http://user:pass@host:port"
 let SPEED = "normal";
 let MIN_DELAY_MS = 1200;
 let MAX_DELAY_MS = 2200;
@@ -404,6 +435,222 @@ const RE_UNDO_REPOST = /(Undo\s+(Repost|Retweet)|Unretweet|Deshacer\s+Repost|Ann
 function rand(min, max) { return Math.floor(min + Math.random() * (max - min + 1)); }
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 async function pause(minMs, maxMs) { await sleep(rand(minMs, maxMs)); }
+
+// Weighted random - pick from array with weights
+function weightedRandom(options) {
+  const total = options.reduce((sum, opt) => sum + opt.weight, 0);
+  let r = Math.random() * total;
+  for (const opt of options) {
+    r -= opt.weight;
+    if (r <= 0) return opt.value;
+  }
+  return options[options.length - 1].value;
+}
+
+// ================= HUMAN BEHAVIOR SIMULATION =================
+// This module makes the bot behave like a real, distracted human
+
+// Mood affects behavior patterns - changes throughout session
+let humanMood = 'normal'; // 'focused', 'normal', 'distracted', 'impatient'
+let actionsSinceBreak = 0;
+let deletionStreak = 0;
+
+// Change mood randomly
+function updateMood() {
+  const roll = Math.random();
+  if (roll < 0.1) humanMood = 'focused';      // 10% - fast, efficient
+  else if (roll < 0.3) humanMood = 'impatient'; // 20% - quick but sloppy
+  else if (roll < 0.5) humanMood = 'distracted'; // 20% - slow, pauses
+  else humanMood = 'normal';                   // 50% - average
+  log("info", `[Human] Mood: ${humanMood}`);
+}
+
+// Get delay multiplier based on mood
+function getMoodMultiplier() {
+  switch (humanMood) {
+    case 'focused': return 0.7;
+    case 'impatient': return 0.5;
+    case 'distracted': return 1.8;
+    default: return 1.0;
+  }
+}
+
+// Human-like scroll - varies distance and speed
+async function humanScroll(page, direction = 'down') {
+  const scrollType = weightedRandom([
+    { value: 'tiny', weight: 15 },      // Small adjustment
+    { value: 'small', weight: 30 },     // Normal read scroll
+    { value: 'medium', weight: 25 },    // Skim scroll
+    { value: 'large', weight: 20 },     // Fast scroll
+    { value: 'huge', weight: 10 },      // Jump scroll (like Page Down)
+  ]);
+
+  const vh = await page.evaluate(() => window.innerHeight);
+  let distance;
+
+  switch (scrollType) {
+    case 'tiny': distance = rand(50, 150); break;
+    case 'small': distance = rand(150, 300); break;
+    case 'medium': distance = rand(300, vh * 0.6); break;
+    case 'large': distance = rand(vh * 0.6, vh * 0.9); break;
+    case 'huge': distance = rand(vh * 0.9, vh * 1.5); break;
+  }
+
+  if (direction === 'up') distance = -distance;
+
+  // Sometimes use wheel, sometimes scrollBy, sometimes keyboard
+  const method = weightedRandom([
+    { value: 'scroll', weight: 50 },
+    { value: 'wheel', weight: 35 },
+    { value: 'key', weight: 15 },
+  ]);
+
+  if (method === 'wheel') {
+    // Wheel scroll in chunks (like real mouse wheel)
+    const chunks = rand(3, 8);
+    const chunkSize = Math.floor(distance / chunks);
+    for (let i = 0; i < chunks; i++) {
+      await page.mouse.wheel(0, chunkSize);
+      await sleep(rand(30, 80)); // Small delay between wheel ticks
+    }
+  } else if (method === 'key' && Math.abs(distance) > vh * 0.5) {
+    // Use keyboard for big scrolls
+    const key = direction === 'down' ? 'PageDown' : 'PageUp';
+    await page.keyboard.press(key);
+  } else {
+    // Standard scrollBy
+    await page.evaluate(d => window.scrollBy({ top: d, behavior: 'smooth' }), distance);
+  }
+
+  // Varied wait after scroll based on scroll size and mood
+  const baseWait = scrollType === 'tiny' ? rand(100, 200) :
+                   scrollType === 'small' ? rand(200, 400) :
+                   scrollType === 'medium' ? rand(400, 800) :
+                   scrollType === 'large' ? rand(600, 1200) :
+                   rand(800, 1500);
+
+  await sleep(Math.floor(baseWait * getMoodMultiplier()));
+}
+
+// Occasionally scroll back up (overshoot correction)
+async function maybeOvershootCorrect(page) {
+  if (Math.random() < 0.12) { // 12% chance
+    log("info", "[Human] Oops, scrolled too far...");
+    await humanScroll(page, 'up');
+    await sleep(rand(300, 700));
+  }
+}
+
+// Random "reading" pause - like stopping to read a tweet
+async function maybeReadPause(page) {
+  const roll = Math.random();
+  if (roll < 0.08) { // 8% chance of long read
+    const duration = rand(2000, 5000);
+    log("info", `[Human] Reading something interesting... (${Math.round(duration/1000)}s)`);
+    await sleep(duration);
+  } else if (roll < 0.25) { // 17% chance of short glance
+    await sleep(rand(500, 1500));
+  }
+}
+
+// Random distraction - check profile, notifications, etc.
+async function maybeGetDistracted(page) {
+  if (Math.random() < 0.03) { // 3% chance
+    const distraction = weightedRandom([
+      { value: 'profile', weight: 40 },
+      { value: 'scroll_up', weight: 30 },
+      { value: 'long_pause', weight: 30 },
+    ]);
+
+    if (distraction === 'profile') {
+      log("info", "[Human] Checking profile...");
+      await page.click(`a[href="/${PROFILE_HANDLE}"]`).catch(() => {});
+      await sleep(rand(1500, 3500));
+      await page.goBack().catch(() => {});
+      await sleep(rand(800, 1500));
+    } else if (distraction === 'scroll_up') {
+      log("info", "[Human] Scrolling back to check something...");
+      for (let i = 0; i < rand(2, 5); i++) {
+        await humanScroll(page, 'up');
+      }
+      await sleep(rand(1000, 2500));
+      // Scroll back down
+      for (let i = 0; i < rand(3, 6); i++) {
+        await humanScroll(page, 'down');
+      }
+    } else {
+      const pauseDuration = rand(3000, 8000);
+      log("info", `[Human] Got distracted... (${Math.round(pauseDuration/1000)}s)`);
+      await sleep(pauseDuration);
+    }
+  }
+}
+
+// Simulate misclick - open menu then close without action
+async function maybeMisclick(page, card) {
+  if (Math.random() < 0.04) { // 4% chance
+    log("info", "[Human] Misclick - closing menu...");
+    await openMenu(page, card);
+    await sleep(rand(200, 500));
+    await page.keyboard.press('Escape');
+    await sleep(rand(500, 1000));
+    return true;
+  }
+  return false;
+}
+
+// Human-like deletion delay - bursty with occasional slow downs
+function getHumanDeleteDelay() {
+  deletionStreak++;
+
+  // After several quick deletions, slow down
+  if (deletionStreak > rand(5, 12)) {
+    deletionStreak = 0;
+    return rand(2500, 5000) * getMoodMultiplier(); // Long pause
+  }
+
+  // Burst mode - quick deletions
+  if (humanMood === 'impatient' || humanMood === 'focused') {
+    return rand(600, 1200) * getMoodMultiplier();
+  }
+
+  // Normal varied delay
+  const delay = weightedRandom([
+    { value: rand(800, 1200), weight: 30 },   // Quick
+    { value: rand(1200, 2000), weight: 40 },  // Normal
+    { value: rand(2000, 3500), weight: 20 },  // Slow
+    { value: rand(3500, 6000), weight: 10 },  // Very slow (distracted)
+  ]);
+
+  return Math.floor(delay * getMoodMultiplier());
+}
+
+// Take a break - happens periodically
+async function maybeTakeBreak(page) {
+  actionsSinceBreak++;
+
+  // Change mood occasionally
+  if (actionsSinceBreak % rand(15, 30) === 0) {
+    updateMood();
+  }
+
+  // Take break every 30-80 actions
+  if (actionsSinceBreak > rand(30, 80)) {
+    actionsSinceBreak = 0;
+    const breakDuration = rand(5000, 15000);
+    log("info", `[Human] Taking a break... (${Math.round(breakDuration/1000)}s)`);
+
+    // Maybe scroll around during break
+    if (Math.random() < 0.4) {
+      for (let i = 0; i < rand(2, 5); i++) {
+        await humanScroll(page, Math.random() < 0.3 ? 'up' : 'down');
+      }
+    }
+
+    await sleep(breakDuration);
+    updateMood();
+  }
+}
 
 // ================= AUTH =================
 async function isLoggedIn(context) {
@@ -817,6 +1064,12 @@ async function tryUndoRepost(page, card) {
 async function collectWorklist(page, want, seen) {
   const cards = allCards(page);
   const n = await cards.count();
+
+  // Debug: log how many cards visible
+  if (n === 0) {
+    log("warn", "No tweet cards found on page!");
+  }
+
   const mine = [];
   for (let i = 0; i < n && mine.length < want; i++) {
     const card = cards.nth(i);
@@ -838,102 +1091,150 @@ async function collectWorklist(page, want, seen) {
 }
 
 // ================= MAIN PROCESSING =================
+// Human-like behavior: varied scrolling, random pauses, misclicks, mood changes
+
+// Human-like scroll to load more tweets
+async function autoScroll(page, wantMore = 15) {
+  const MAX_PASSES = 25;
+
+  let prevCount = await allCards(page).count();
+  let lastH = await page.evaluate(() => document.documentElement.scrollHeight);
+  let stale = 0;
+
+  // Initialize mood at start of scroll session
+  if (Math.random() < 0.2) updateMood();
+
+  for (let pass = 0; pass < MAX_PASSES && !isAborted(); pass++) {
+    // Vary number of scrolls per pass (humans don't scroll exactly 10 times)
+    const scrollsThisPass = rand(4, 12);
+
+    for (let i = 0; i < scrollsThisPass && !isAborted(); i++) {
+      await humanScroll(page, 'down');
+
+      // Human behaviors during scrolling
+      await maybeReadPause(page);
+      await maybeOvershootCorrect(page);
+
+      // Occasionally get distracted
+      if (i === Math.floor(scrollsThisPass / 2)) {
+        await maybeGetDistracted(page);
+      }
+    }
+
+    const h = await page.evaluate(() => document.documentElement.scrollHeight);
+    stale = (h === lastH) ? stale + 1 : 0;
+    lastH = h;
+
+    const now = await allCards(page).count();
+    if (now - prevCount >= wantMore) break;
+    prevCount = now;
+
+    // More patience when stale (like a human trying again)
+    if (stale >= 2 && stale < 5) {
+      log("info", "[Human] Hmm, nothing new... trying again");
+      await sleep(rand(1000, 2500));
+    }
+    if (stale >= 5) break;
+  }
+}
+
 async function processTab(page, tabName, removed, startTime) {
   console.log("");
   log("tab", chalk.magenta.bold(`Processing ${tabName}`));
   log("info", `DELETE before ${formatDate(DELETE_BEFORE)}, PROTECT after ${formatDate(PROTECT_AFTER)}`);
 
+  // Initialize human state for this tab
+  updateMood();
+  actionsSinceBreak = 0;
+  deletionStreak = 0;
+
   await gotoProfileTab(page, tabName);
 
-  let lastProgressTime = Date.now();
-  let sweepCount = 0;
-  const MAX_SWEEPS = 50;  // Max full sweeps before giving up
+  // Initial human-like scroll (not exactly 18, vary it)
+  await autoScroll(page, rand(12, 22));
 
-  // Outer loop: Full sweeps from top to bottom
-  while (removed.count < TARGET && !isAborted() && sweepCount < MAX_SWEEPS) {
-    sweepCount++;
-    let deletedThisSweep = 0;
-    let noLoadCount = 0;
-    const seen = new Set();  // Fresh seen set each sweep
+  const seen = new Set();
+  let noMatchPasses = 0;
+  const MAX_NO_MATCH_PASSES = 20; // More patient
 
-    // Go to top for each sweep
-    log("info", `Starting sweep ${sweepCount}...`);
-    await scrollToTop(page);
-    await page.waitForTimeout(1000);
+  while (removed.count < TARGET && !isAborted()) {
+    // Vary batch size (humans don't always grab exactly 10)
+    const need = Math.min(rand(5, 15), TARGET - removed.count);
+    let work = await collectWorklist(page, need, seen);
 
-    // Inner loop: Scroll down page by page, deleting as we go
-    while (removed.count < TARGET && !isAborted() && noLoadCount < 10) {
-      // Periodic status update
-      if (Date.now() - lastProgressTime > 2 * 60 * 1000) {
-        log("info", `Still running... ${removed.count}/${TARGET} deleted (sweep ${sweepCount})`);
-        lastProgressTime = Date.now();
-      }
+    if (!work.length) {
+      // No deletable tweets found - scroll more
+      const before = await allCards(page).count();
+      await autoScroll(page, rand(8, 16));
+      const after = await allCards(page).count();
 
-      // Find deletable tweets in current view
-      const work = await collectWorklist(page, Math.min(10, TARGET - removed.count), seen);
+      if (after <= before) {
+        noMatchPasses++;
+        log("info", `No new tweets loaded (${noMatchPasses}/${MAX_NO_MATCH_PASSES})`);
 
-      if (work.length > 0) {
-        noLoadCount = 0;
-
-        // Delete each tweet found
-        for (const card of work) {
-          if (isAborted() || removed.count >= TARGET) break;
-
-          try {
-            await card.scrollIntoViewIfNeeded().catch(() => {});
-            await page.waitForTimeout(100);
-
-            let res = await tryDelete(page, card);
-            if (!res.ok) res = await tryUndoRepost(page, card);
-
-            if (res.ok) {
-              removed.count++;
-              deletedThisSweep++;
-              updateProgress(removed.count, tabName, TARGET);
-              lastProgressTime = Date.now();
-            }
-          } catch (e) {
-            log("error", "Delete failed (continuing)", e?.message || e);
+        // Human frustration behavior
+        if (noMatchPasses === 5) {
+          log("info", "[Human] Getting frustrated, trying a big scroll...");
+          for (let i = 0; i < rand(3, 6); i++) {
+            await page.keyboard.press('PageDown');
+            await sleep(rand(200, 500));
           }
-
-          await pause(MIN_DELAY_MS, MAX_DELAY_MS);
+          await sleep(rand(1000, 2000));
         }
 
-        // Rate limit protection
-        if (removed.count % 100 === 0 && removed.count > 0) {
-          log("info", `${removed.count} deleted. Brief pause...`);
-          await page.waitForTimeout(3000);
+        if (noMatchPasses >= MAX_NO_MATCH_PASSES) {
+          log("info", `No more matching tweets on ${tabName}`);
+          break;
         }
-      }
-
-      // Scroll down to next section
-      const beforeCount = await allCards(page).count();
-      await page.evaluate(() => window.scrollBy(0, window.innerHeight * 0.8));
-      await page.waitForTimeout(600);
-      const afterCount = await allCards(page).count();
-
-      // Check if we hit the bottom (no new tweets loading)
-      if (afterCount <= beforeCount) {
-        noLoadCount++;
       } else {
-        noLoadCount = 0;
+        noMatchPasses = 0;
       }
+      continue;
     }
 
-    log("info", `Sweep ${sweepCount} complete: ${deletedThisSweep} deleted this sweep`);
+    noMatchPasses = 0;
 
-    // If no deletions this sweep, we might be done
-    if (deletedThisSweep === 0) {
-      // Try refreshing page once to see if more tweets appear
-      if (sweepCount % 3 === 0) {
-        log("info", "No deletions - refreshing page to check for more...");
-        await page.reload({ waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
-        await page.waitForTimeout(3000);
-      } else {
-        // Two consecutive empty sweeps = probably done
-        log("info", "No more deletable tweets found. Done with tab.");
-        break;
+    // Delete found tweets with human-like behavior
+    for (const card of work) {
+      if (isAborted() || removed.count >= TARGET) break;
+
+      try {
+        // Maybe misclick first
+        await maybeMisclick(page, card);
+
+        // Actual deletion attempt
+        let res = await tryDelete(page, card);
+        if (!res.ok) res = await tryUndoRepost(page, card);
+
+        if (res.ok) {
+          removed.count++;
+          updateProgress(removed.count, tabName, TARGET);
+        }
+      } catch (e) {
+        log("error", "Delete failed (continuing)", e?.message || e);
+        // Human recovery from error - pause and maybe scroll
+        await sleep(rand(500, 1500));
       }
+
+      // Human-like delay between deletions
+      await sleep(getHumanDeleteDelay());
+
+      // Maybe take a break
+      await maybeTakeBreak(page);
+    }
+
+    // Varied rate limit protection (not exactly every 100)
+    const checkInterval = rand(80, 130);
+    if (removed.count % checkInterval === 0 && removed.count > 0) {
+      const pauseDuration = rand(8000, 20000);
+      log("info", `${removed.count} deleted. Taking a longer break... (${Math.round(pauseDuration/1000)}s)`);
+      await sleep(pauseDuration);
+      updateMood();
+    }
+
+    // Scroll more to find more tweets (varied amount)
+    if (removed.count < TARGET && !isAborted()) {
+      await autoScroll(page, rand(6, 14));
     }
   }
 }
@@ -962,8 +1263,35 @@ async function run() {
 
   let context, browser, page;
 
-  // Browser args to prevent throttling when window loses focus
-  const browserArgs = [
+  // Anti-detection setup
+  const userAgent = getRandomUserAgent();
+  const viewport = getRandomViewport();
+  log("info", `Viewport: ${viewport.width}x${viewport.height}`);
+
+  // Build context options with anti-detection features
+  const contextOptions = {
+    viewport,
+    userAgent,
+    // Realistic browser settings
+    locale: 'en-US',
+    timezoneId: 'America/New_York',
+    // Prevent WebDriver detection
+    bypassCSP: true,
+  };
+
+  // Add proxy if configured
+  if (PROXY_SERVER) {
+    log("info", `Using proxy: ${PROXY_SERVER.replace(/:[^:@]+@/, ':****@')}`);
+    contextOptions.proxy = { server: PROXY_SERVER };
+  }
+
+  // Choose browser engine
+  const browserEngine = USE_FIREFOX ? firefox : chromium;
+  const browserName = USE_FIREFOX ? 'Firefox' : 'Edge';
+  log("info", `Browser: ${browserName}`);
+
+  // Browser args to prevent throttling (Chromium-specific, Firefox ignores these)
+  const chromiumArgs = [
     "--disable-blink-features=AutomationControlled",
     "--disable-infobars",
     "--disable-automation",
@@ -973,24 +1301,41 @@ async function run() {
   ];
 
   // Private mode: always use fresh browser (no Edge profile)
-  if (PRIVATE_MODE) {
-    log("info", "Using private browser mode (fresh session)");
-    browser = await chromium.launch({
-      headless: HEADLESS,
-      channel: 'msedge',
-      args: browserArgs,
-      ignoreDefaultArgs: ["--enable-automation"]
-    });
-    // Use handle-specific storage if it exists and is valid
+  if (PRIVATE_MODE || USE_FIREFOX) {
+    log("info", USE_FIREFOX ? "Using Firefox (fresh session)" : "Using private browser mode");
     const handleStorage = getStoragePath(PROFILE_HANDLE);
-    const useStorage = isSessionValid(PROFILE_HANDLE) ? handleStorage : undefined;
+    const hasSession = isSessionValid(PROFILE_HANDLE);
 
+    // MUST show browser if no saved session (user needs to login)
+    const needsLogin = !hasSession;
+    const actualHeadless = needsLogin ? false : HEADLESS;
+
+    if (needsLogin) {
+      log("info", "No saved session - browser will open for login");
+    }
+
+    // Firefox launch options
+    const launchOptions = {
+      headless: actualHeadless,
+    };
+
+    // Add Chromium-specific options only for Chromium
+    if (!USE_FIREFOX) {
+      launchOptions.channel = 'msedge';
+      launchOptions.args = chromiumArgs;
+      launchOptions.ignoreDefaultArgs = ["--enable-automation"];
+    }
+
+    browser = await browserEngine.launch(launchOptions);
+
+    // Create context with anti-detection options
     context = await browser.newContext({
-      storageState: useStorage
+      ...contextOptions,
+      storageState: hasSession ? handleStorage : undefined,
     });
     page = await context.newPage();
   } else {
-    // Try to use Edge profile (has extensions like 1Password)
+    // Edge profile mode (non-Firefox, non-private)
     const userDataDir = process.env.EDGE_USER_DATA || path.join(process.env.LOCALAPPDATA || '', 'Microsoft', 'Edge', 'User Data');
     const profileDir = process.env.EDGE_PROFILE || 'Default';
 
@@ -1000,8 +1345,9 @@ async function run() {
         {
           headless: HEADLESS,
           channel: 'msedge',
+          ...contextOptions,
           args: [
-            ...browserArgs,
+            ...chromiumArgs,
             "--no-first-run",
             "--no-default-browser-check",
             "--enable-extensions",
@@ -1018,14 +1364,15 @@ async function run() {
       browser = await chromium.launch({
         headless: HEADLESS,
         channel: 'msedge',
-        args: browserArgs,
+        args: chromiumArgs,
         ignoreDefaultArgs: ["--enable-automation"]
       });
       const handleStorage = getStoragePath(PROFILE_HANDLE);
       const useStorage = isSessionValid(PROFILE_HANDLE) ? handleStorage : undefined;
 
       context = await browser.newContext({
-        storageState: useStorage
+        ...contextOptions,
+        storageState: useStorage,
       });
       page = await context.newPage();
     }
@@ -1126,8 +1473,10 @@ async function runCleanup(config, callbacks = {}) {
   INCLUDE_REPLIES = config.replies !== false;
   HANDLE_REPOSTS = config.reposts === true;
   SPEED = config.speed || 'normal';
-  HEADLESS = config.headless === true; // Only headless if explicitly set - default to showing browser for login
-  PRIVATE_MODE = config.privateMode === true; // Use fresh browser instead of Edge profile
+  HEADLESS = config.headless === true;
+  PRIVATE_MODE = config.privateMode === true;
+  USE_FIREFOX = config.useFirefox !== false;  // Default to Firefox (better anti-detection)
+  PROXY_SERVER = config.proxy || null;         // Optional: "host:port" or "http://user:pass@host:port"
 
   // Set delays based on speed
   const delays = SPEED_PRESETS[SPEED] || SPEED_PRESETS.normal;

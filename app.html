@@ -963,6 +963,23 @@
           </div>
         </div>
 
+        <div class="section-head">Anti-Detection</div>
+        <div class="glass-card">
+          <div class="card-row">
+            <span class="card-label">Use Firefox</span>
+            <div class="toggle on" data-setting="useFirefox"></div>
+          </div>
+          <div class="card-row" style="flex-direction: column; align-items: flex-start; gap: 8px;">
+            <span class="card-label">Proxy (optional)</span>
+            <input type="text" id="proxyInput" placeholder="http://host:port"
+              style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.2); background: rgba(0,0,0,0.3); color: white; font-size: 13px;">
+          </div>
+          <p style="font-size: 11px; color: rgba(255,255,255,0.5); margin-top: 8px; line-height: 1.4;">
+            Firefox + random viewport helps avoid bot detection.<br>
+            Free proxies: <a href="#" onclick="api.openExternal('https://free-proxy-list.net/'); return false;" style="color: var(--cyan);">free-proxy-list.net</a>
+          </p>
+        </div>
+
         <div class="section-head">License</div>
         <div class="glass-card license-collapsible" id="licenseCard" onclick="toggleLicenseDetails(event)">
           <!-- Collapsed view (default) -->
@@ -1019,7 +1036,7 @@
         <!-- Footer -->
         <div style="text-align: center; margin-top: 16px; padding-bottom: 8px;">
           <span id="appVersion" style="font-size: 10px; color: var(--white-20);">
-            · A product of <a href="#" onclick="ipcRenderer.send('open-external', 'https://choppedonions.xyz'); return false;" style="color: var(--white-30); text-decoration: none;">ChoppedOnions.xyz</a>
+            · A product of <a href="#" onclick="api.openExternal( 'https://choppedonions.xyz'); return false;" style="color: var(--white-30); text-decoration: none;">ChoppedOnions.xyz</a>
           </span>
         </div>
 
@@ -1153,21 +1170,21 @@
   </div>
 
   <script>
-    const { ipcRenderer } = require('electron');
-    const path = require('path');
+    // Use secure preload API (contextIsolation enabled)
+    const api = window.electronAPI;
 
-    // Auto-set version from package.json
-    try {
-      const pkg = require(path.join(__dirname, 'package.json'));
-      document.addEventListener('DOMContentLoaded', () => {
+    // Auto-set version from preload API
+    document.addEventListener('DOMContentLoaded', () => {
+      try {
+        const version = api.getAppVersion();
         const versionEl = document.getElementById('appVersion');
-        if (versionEl) versionEl.innerHTML = `v${pkg.version} ` + versionEl.innerHTML;
-      });
-    } catch (e) { console.error('Could not read version:', e); }
+        if (versionEl) versionEl.innerHTML = `v${version} ` + versionEl.innerHTML;
+      } catch (e) { console.error('Could not read version:', e); }
+    });
 
-    function minimizeWindow() { ipcRenderer.send('window-minimize'); }
-    function maximizeWindow() { ipcRenderer.send('window-maximize'); }
-    function closeWindow() { ipcRenderer.send('window-close'); }
+    function minimizeWindow() { api.minimizeWindow(); }
+    function maximizeWindow() { api.maximizeWindow(); }
+    function closeWindow() { api.closeWindow(); }
 
     let config = {
       handle: '', posts: true, replies: true, reposts: false,
@@ -1218,11 +1235,11 @@
     }
 
     function openPurchaseLink() {
-      ipcRenderer.send('open-external', 'https://buy.stripe.com/00w3cv9Vi6018hs8up0co00');
+      api.openExternal( 'https://buy.stripe.com/00w3cv9Vi6018hs8up0co00');
     }
 
     function openSupportLink() {
-      ipcRenderer.send('open-external', 'mailto:support@deletemytweets.app?subject=Lost%20License%20Key');
+      api.openExternal( 'mailto:support@deletemytweets.app?subject=Lost%20License%20Key');
     }
 
     function activateLicense() {
@@ -1246,7 +1263,7 @@
       }
 
       errorEl.style.display = 'none';
-      ipcRenderer.send('activate-license', formatted);
+      api.activateLicense( formatted);
     }
 
     function deactivateLicense() {
@@ -1254,7 +1271,7 @@
         // Immediately invalidate license state before IPC response
         hasValidLicense = false;
         disableAppUI();
-        ipcRenderer.send('deactivate-license');
+        api.deactivateLicense();
       }
     }
 
@@ -1323,7 +1340,7 @@
     });
 
     // Handle license status from main process
-    ipcRenderer.on('license-status', (event, license) => {
+    api.onLicenseStatus((license) => {
       updateLicenseDisplay(license);  // This handles enableAppUI/disableAppUI internally
       if (!license || !license.licenseKey) {
         showLicenseModal();
@@ -1333,7 +1350,7 @@
     });
 
     // Handle license activation result
-    ipcRenderer.on('license-result', (event, result) => {
+    api.onLicenseResult((result) => {
       if (result.success) {
         hideLicenseModal();
         updateLicenseDisplay(result.license);
@@ -1346,7 +1363,7 @@
     });
 
     // Check license on app load
-    ipcRenderer.send('get-license');
+    api.getLicense();
 
     // ═══════════════════════════════════════════════════════
     // DELETION STATS TRACKING (per account)
@@ -1498,7 +1515,7 @@
       localStorage.removeItem(key);
 
       // Also tell backend to remove session data
-      ipcRenderer.send('remove-account-session', handle);
+      api.removeAccountSession( handle);
 
       updateAllAccountsList();
       showNotification(`Removed @${handle}`, 'success');
@@ -1512,7 +1529,7 @@
       updateHistoryDisplay();
       updateAllAccountsList();
       updateLoginButtonForAccount();
-      ipcRenderer.send('save-config', { handle: handle });  // Persist selection
+      api.saveConfig( { handle: handle });  // Persist selection
     }
 
     let lastDeletedCount = 0;
@@ -1539,8 +1556,9 @@
         if (s === 'reposts') config.reposts = t.classList.contains('on');
         if (s === 'showBrowser') config.headless = !t.classList.contains('on');
         if (s === 'privateMode') config.privateMode = t.classList.contains('on');
+        if (s === 'useFirefox') config.useFirefox = t.classList.contains('on');
         // Save settings
-        ipcRenderer.send('save-config', config);
+        api.saveConfig( config);
       });
     });
 
@@ -1553,7 +1571,7 @@
         // Show warning for aggressive/fast speed
         document.getElementById('speedWarning').style.display =
           c.dataset.speed === 'aggressive' ? 'block' : 'none';
-        ipcRenderer.send('save-config', config);
+        api.saveConfig( config);
       });
     });
 
@@ -1577,14 +1595,14 @@
     ['deleteMonth', 'deleteYear', 'protectMonth', 'protectYear'].forEach(id => {
       document.getElementById(id).addEventListener('change', (e) => {
         config[id] = parseInt(e.target.value);
-        ipcRenderer.send('save-config', config);
+        api.saveConfig( config);
       });
     });
 
     // Save target when changed
     document.getElementById('target').addEventListener('change', (e) => {
       config.target = parseInt(e.target.value) || 10000;
-      ipcRenderer.send('save-config', config);
+      api.saveConfig( config);
     });
 
     // Modal
@@ -1604,8 +1622,8 @@
         document.getElementById('statusDot').classList.remove('ready');  // Don't show ready until login verified
         updateHistoryDisplay();  // Update stats for new account
         updateAllAccountsList();  // Update accounts list
-        ipcRenderer.send('save-config', { handle: h });  // Persist handle
-        ipcRenderer.send('check-session', h);  // Check if we have a saved session - this will update statusDot
+        api.saveConfig( { handle: h });  // Persist handle
+        api.checkSession( h);  // Check if we have a saved session - this will update statusDot
       }
       hideModal();
     }
@@ -1642,14 +1660,14 @@
       btn.textContent = '...';
       btn.disabled = true;
       showNotification('Opening browser - please log in to X manually', 'info');
-      ipcRenderer.send('login-x', config.handle);
+      api.loginX( config.handle);
     }
 
     function logoutOfX() {
       const btn = document.getElementById('sessionBtn');
       btn.textContent = '...';
       btn.disabled = true;
-      ipcRenderer.send('logout-x', config.handle);
+      api.logoutX( config.handle);
     }
 
     // Update login button when switching accounts
@@ -1658,7 +1676,7 @@
       btn.disabled = false;
       // Check session status for current handle
       if (config.handle) {
-        ipcRenderer.send('check-session', config.handle);
+        api.checkSession( config.handle);
       } else {
         isLoggedIn = false;
         updateSessionButton();
@@ -1666,7 +1684,7 @@
     }
 
     // Handle login result
-    ipcRenderer.on('login-x-result', (event, { success, message }) => {
+    api.onLoginXResult(({ success, message }) => {
       const btn = document.getElementById('sessionBtn');
       btn.disabled = false;
       if (success) {
@@ -1680,7 +1698,7 @@
     });
 
     // Handle logout result
-    ipcRenderer.on('logout-x-result', (event, { success, message }) => {
+    api.onLogoutXResult(({ success, message }) => {
       const btn = document.getElementById('sessionBtn');
       btn.disabled = false;
       if (success) {
@@ -1696,7 +1714,7 @@
     });
 
     // Check session status for a handle
-    ipcRenderer.on('session-status', (event, { hasSession }) => {
+    api.onSessionStatus(({ hasSession }) => {
       isLoggedIn = hasSession;
       updateSessionButton();
       // Update status dot based on login state
@@ -1708,7 +1726,7 @@
     });
 
     // First-time login notification
-    ipcRenderer.on('first-time-login', (event, { handle }) => {
+    api.onFirstTimeLogin(({ handle }) => {
       showNotification(`First time? Click LOGIN to authenticate @${handle} with X`, 'info');
     });
 
@@ -1801,7 +1819,7 @@
 
       if (isRunning) {
         wasStopped = true;
-        ipcRenderer.send('stop-cleanup');
+        api.stopCleanup();
         return;
       }
 
@@ -1810,6 +1828,8 @@
       config.deleteYear = parseInt(document.getElementById('deleteYear').value);
       config.protectMonth = parseInt(document.getElementById('protectMonth').value);
       config.protectYear = parseInt(document.getElementById('protectYear').value);
+      config.useFirefox = config.useFirefox !== false;  // Default to true (toggle handler maintains this)
+      config.proxy = document.getElementById('proxyInput').value.trim() || null;
 
       document.querySelector('[data-tab="progress"]').click();
       isRunning = true;
@@ -1836,11 +1856,11 @@
       const btn = document.getElementById('actionBtn');
       btn.classList.add('running','stop');
       btn.textContent = 'Stop';
-      ipcRenderer.send('start-cleanup', config);
+      api.startCleanup( config);
     }
 
-    // IPC
-    ipcRenderer.on('cleanup-progress', (e, d) => {
+    // IPC listeners (using secure preload API)
+    api.onCleanupProgress((d) => {
       const pct = Math.round((d.scanned / d.target) * 100);
       document.getElementById('progressNum').textContent = pct + '%';
       document.getElementById('delCount').textContent = d.deleted;
@@ -1859,14 +1879,17 @@
       }
     });
 
-    ipcRenderer.on('cleanup-log', (e, d) => {
+    api.onCleanupLog((d) => {
       const log = document.getElementById('logBox');
       const cls = d.type === 'success' ? 'ok' : d.type === 'error' ? 'err' : '';
-      log.innerHTML += `<div class="log-line ${cls}">${d.message}</div>`;
+      // Sanitize message to prevent XSS
+      const safeMsg = document.createElement('div');
+      safeMsg.textContent = d.message;
+      log.innerHTML += `<div class="log-line ${cls}">${safeMsg.innerHTML}</div>`;
       log.scrollTop = log.scrollHeight;
     });
 
-    ipcRenderer.on('cleanup-error', (e, errorMessage) => {
+    api.onCleanupError((errorMessage) => {
       isRunning = false;
 
       // Stop timer if running
@@ -1889,7 +1912,7 @@
       }
     });
 
-    ipcRenderer.on('cleanup-complete', () => {
+    api.onCleanupComplete(() => {
       isRunning = false;
 
       // Stop timer
@@ -1918,7 +1941,7 @@
       updateHistoryDisplay();
     });
 
-    ipcRenderer.on('load-config', (e, c) => {
+    api.onLoadConfig((c) => {
       if (c) {
         // Restore handle
         if (c.handle) {
@@ -1927,7 +1950,7 @@
           document.getElementById('avatar').textContent = c.handle[0].toUpperCase();
           document.getElementById('statusDot').classList.remove('ready');
           updateHistoryDisplay();
-          ipcRenderer.send('check-session', c.handle);
+          api.checkSession( c.handle);
         }
 
         // Restore toggles
@@ -1950,6 +1973,13 @@
         if (c.privateMode !== undefined) {
           config.privateMode = c.privateMode;
           document.querySelector('[data-setting="privateMode"]').classList.toggle('on', c.privateMode);
+        }
+        if (c.useFirefox !== undefined) {
+          config.useFirefox = c.useFirefox;
+          document.querySelector('[data-setting="useFirefox"]').classList.toggle('on', c.useFirefox);
+        }
+        if (c.proxy) {
+          document.getElementById('proxyInput').value = c.proxy;
         }
 
         // Restore speed
@@ -1990,7 +2020,7 @@
       updateAllAccountsList();
     });
 
-    ipcRenderer.send('get-config');
+    api.getConfig();
 
     // Initialize accounts list on load
     updateAllAccountsList();
