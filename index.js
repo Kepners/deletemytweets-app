@@ -984,7 +984,9 @@ async function run() {
     "--disable-automation",
     "--disable-backgrounding-occluded-windows",
     "--disable-renderer-backgrounding",
-    "--disable-background-timer-throttling"
+    "--disable-background-timer-throttling",
+    "--test-type",  // Suppress "unsupported command-line flag" warnings
+    "--no-sandbox"  // Required for some environments
   ];
 
   // Private mode: always use fresh browser (no Edge profile)
