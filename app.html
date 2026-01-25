@@ -1133,15 +1133,17 @@
             <span class="card-label">Use Firefox</span>
             <div class="toggle on" data-setting="useFirefox"></div>
           </div>
-          <div class="card-row" style="flex-direction: column; align-items: flex-start; gap: 8px;">
-            <span class="card-label">Proxy (optional)</span>
-            <input type="text" id="proxyInput" placeholder="http://host:port"
-              style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.2); background: rgba(0,0,0,0.3); color: white; font-size: 13px;">
+          <div id="firefoxOptions" style="overflow: hidden; transition: max-height 0.3s ease, opacity 0.3s ease;">
+            <div class="card-row" style="flex-direction: column; align-items: flex-start; gap: 8px;">
+              <span class="card-label">Proxy (optional)</span>
+              <input type="text" id="proxyInput" placeholder="http://host:port"
+                style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.2); background: rgba(0,0,0,0.3); color: white; font-size: 13px;">
+            </div>
+            <p style="font-size: 11px; color: rgba(255,255,255,0.5); margin-top: 8px; line-height: 1.4;">
+              Firefox + random viewport helps avoid bot detection.<br>
+              Free proxies: <a href="#" onclick="api.openExternal('https://free-proxy-list.net/'); return false;" style="color: var(--cyan);">free-proxy-list.net</a>
+            </p>
           </div>
-          <p style="font-size: 11px; color: rgba(255,255,255,0.5); margin-top: 8px; line-height: 1.4;">
-            Firefox + random viewport helps avoid bot detection.<br>
-            Free proxies: <a href="#" onclick="api.openExternal('https://free-proxy-list.net/'); return false;" style="color: var(--cyan);">free-proxy-list.net</a>
-          </p>
         </div>
 
         <div class="section-head">License</div>
@@ -1720,7 +1722,18 @@
         if (s === 'reposts') config.reposts = t.classList.contains('on');
         if (s === 'showBrowser') config.headless = !t.classList.contains('on');
         if (s === 'privateMode') config.privateMode = t.classList.contains('on');
-        if (s === 'useFirefox') config.useFirefox = t.classList.contains('on');
+        if (s === 'useFirefox') {
+          config.useFirefox = t.classList.contains('on');
+          // Show/hide Firefox options (proxy, etc.)
+          const firefoxOpts = document.getElementById('firefoxOptions');
+          if (config.useFirefox) {
+            firefoxOpts.style.maxHeight = '200px';
+            firefoxOpts.style.opacity = '1';
+          } else {
+            firefoxOpts.style.maxHeight = '0';
+            firefoxOpts.style.opacity = '0';
+          }
+        }
         // Save settings
         api.saveConfig( config);
       });
@@ -2386,6 +2399,15 @@
         if (c.useFirefox !== undefined) {
           config.useFirefox = c.useFirefox;
           document.querySelector('[data-setting="useFirefox"]').classList.toggle('on', c.useFirefox);
+          // Show/hide Firefox options
+          const firefoxOpts = document.getElementById('firefoxOptions');
+          if (c.useFirefox) {
+            firefoxOpts.style.maxHeight = '200px';
+            firefoxOpts.style.opacity = '1';
+          } else {
+            firefoxOpts.style.maxHeight = '0';
+            firefoxOpts.style.opacity = '0';
+          }
         }
         if (c.proxy) {
           document.getElementById('proxyInput').value = c.proxy;
