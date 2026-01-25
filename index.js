@@ -811,9 +811,27 @@ async function tryDelete(page, card) {
 
 async function tryUndoRepost(page, card) {
   if (!HANDLE_REPOSTS) return { ok: false, reason: "repost-disabled" };
-  if (!(await openMenu(page, card))) return { ok: false, reason: "no-menu" };
+
+  // Find the repost button (green when active) - NOT the caret menu
+  const repostBtn = card.locator('[data-testid="unretweet"], [data-testid="retweet"]').first();
+  if (!(await repostBtn.count())) return { ok: false, reason: "no-repost-btn" };
+
+  // Check if it's actually a repost (unretweet button present means it's reposted)
+  const isReposted = await card.locator('[data-testid="unretweet"]').count() > 0;
+  if (!isReposted) return { ok: false, reason: "not-a-repost" };
+
+  // Click the repost button to open the undo menu
+  await repostBtn.click({ timeout: 5000 }).catch(() => {});
+  await page.waitForTimeout(200);
+
+  // Now click "Undo Repost" from the popup menu
   const ok = await clickMenuItem(page, RE_UNDO_REPOST);
-  return ok ? { ok: true, reason: "unreposted" } : { ok: false, reason: "no-undo-item" };
+  if (!ok) {
+    // Close any open menu
+    await page.keyboard.press("Escape").catch(() => {});
+    return { ok: false, reason: "no-undo-item" };
+  }
+  return { ok: true, reason: "unreposted" };
 }
 
 async function collectWorklist(page, want, seen) {
@@ -896,9 +914,9 @@ async function processTab(page, tabName, removed, startTime) {
             let res = await tryDelete(page, card);
             if (!res.ok) res = await tryUndoRepost(page, card);
 
-            // Log if tweet couldn't be deleted (might be someone else's repost)
+            // Log if tweet couldn't be deleted
             if (!res.ok) {
-              log("info", `Skipped: ${res.reason} (may be someone else's content)`);
+              log("info", `Skipped: ${res.reason}`);
             }
 
             if (res.ok) {
