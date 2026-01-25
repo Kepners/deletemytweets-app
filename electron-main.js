@@ -155,14 +155,15 @@ ipcMain.on('start-cleanup', async (event, config) => {
       const clean = line.replace(/\x1b\[[0-9;]*m/g, '');
 
       // Detect log type from content
+      // Only count actual deletion/protection events (lines with → DELETE or Protected prefix)
       let type = 'info';
-      if (clean.includes('✗') || clean.includes('DELETED') || clean.includes('deleted')) {
+      if (clean.includes('→ DELETE') || clean.includes('✗ DELETED')) {
         type = 'delete';
         cleanupStats.deleted++;
-      } else if (clean.includes('🛡') || clean.includes('PROTECTED') || clean.includes('protected')) {
+      } else if (clean.includes('Protected "') || clean.includes('🛡 Protected')) {
         type = 'protect';
         cleanupStats.protected++;
-      } else if (clean.includes('⊘') || clean.includes('SKIPPED') || clean.includes('skipped')) {
+      } else if (clean.includes('Outside range') || clean.includes('⊘ SKIPPED')) {
         type = 'skip';
         cleanupStats.skipped++;
       } else if (clean.includes('ERROR') || clean.includes('Error') || clean.includes('error')) {
