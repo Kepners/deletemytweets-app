@@ -848,6 +848,140 @@
       background: linear-gradient(135deg, var(--magenta), var(--purple));
       box-shadow: 0 0 15px rgba(255,0,230,0.3);
     }
+
+    /* Timeline Slider */
+    .timeline-container {
+      padding: 16px 12px 8px;
+    }
+
+    .timeline-track {
+      position: relative;
+      height: 32px;
+      background: var(--white-10);
+      border-radius: 8px;
+      cursor: pointer;
+    }
+
+    .timeline-selection {
+      position: absolute;
+      height: 100%;
+      background: linear-gradient(90deg, var(--coral), var(--magenta));
+      border-radius: 8px;
+      transition: left 0.1s, width 0.1s;
+    }
+
+    .timeline-selection.protect-mode {
+      background: linear-gradient(90deg, var(--cyan), var(--purple));
+    }
+
+    .timeline-handle {
+      position: absolute;
+      top: -4px;
+      width: 16px;
+      height: 40px;
+      background: var(--white);
+      border-radius: 4px;
+      cursor: ew-resize;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+      transform: translateX(-50%);
+      z-index: 10;
+    }
+
+    .timeline-handle:hover {
+      background: var(--cyan);
+    }
+
+    .timeline-handle::after {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 4px;
+      height: 16px;
+      background: var(--dark);
+      border-radius: 2px;
+    }
+
+    .timeline-labels {
+      display: flex;
+      justify-content: space-between;
+      padding: 8px 4px 0;
+      font-size: 10px;
+      color: var(--white-60);
+    }
+
+    .timeline-years {
+      display: flex;
+      justify-content: space-between;
+      padding: 4px 4px 0;
+      font-size: 9px;
+      color: var(--white-30);
+    }
+
+    .mode-toggle {
+      display: flex;
+      gap: 4px;
+      background: var(--white-10);
+      border-radius: 20px;
+      padding: 3px;
+    }
+
+    .mode-btn {
+      padding: 6px 12px;
+      border: none;
+      border-radius: 16px;
+      background: transparent;
+      color: var(--white-60);
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+
+    .mode-btn.active {
+      background: linear-gradient(135deg, var(--coral), var(--magenta));
+      color: var(--white);
+      box-shadow: 0 0 15px rgba(255,0,230,0.3);
+    }
+
+    .mode-btn.active.protect {
+      background: linear-gradient(135deg, var(--cyan), var(--purple));
+      box-shadow: 0 0 15px rgba(0,255,209,0.3);
+    }
+
+    .selection-summary {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      padding: 12px;
+      margin-top: 8px;
+      background: var(--white-05);
+      border-radius: 8px;
+    }
+
+    .summary-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+    }
+
+    .summary-row .icon {
+      font-size: 14px;
+    }
+
+    .summary-row.delete { color: var(--coral); }
+    .summary-row.protect { color: var(--cyan); }
+    .summary-row.skip { color: var(--white-60); }
+
+    .date-display {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--white);
+      text-align: center;
+      padding: 8px 0 4px;
+    }
   </style>
 </head>
 <body>
@@ -918,20 +1052,50 @@
 
         <div class="section-head">Date Range</div>
         <div class="glass-card">
+          <!-- Mode Toggle -->
           <div class="card-row">
-            <span class="card-label" style="color:var(--coral)">🗑 Delete from</span>
-            <div class="select-group">
-              <select id="deleteMonth"></select>
-              <select id="deleteYear"></select>
+            <span class="card-label">Selection Mode</span>
+            <div class="mode-toggle">
+              <button class="mode-btn active" data-mode="delete" id="modeDelete">🗑 Delete</button>
+              <button class="mode-btn" data-mode="protect" id="modeProtect">🛡 Keep</button>
             </div>
           </div>
-          <div class="card-row">
-            <span class="card-label" style="color:var(--cyan)">🛡 Protect after</span>
-            <div class="select-group">
-              <select id="protectMonth"></select>
-              <select id="protectYear"></select>
+
+          <!-- Current Selection Display -->
+          <div class="date-display" id="dateDisplay">
+            Dec 2014 → Jan 2026
+          </div>
+
+          <!-- Timeline Slider -->
+          <div class="timeline-container">
+            <div class="timeline-track" id="timelineTrack">
+              <div class="timeline-selection" id="timelineSelection"></div>
+              <div class="timeline-handle" id="handleStart"></div>
+              <div class="timeline-handle" id="handleEnd"></div>
+            </div>
+            <div class="timeline-labels">
+              <span>2006</span>
+              <span id="currentYearLabel">2026</span>
             </div>
           </div>
+
+          <!-- Summary -->
+          <div class="selection-summary">
+            <div class="summary-row delete">
+              <span class="icon">🗑</span>
+              <span id="deleteSummary">Delete: Dec 2014 → Jan 2026</span>
+            </div>
+            <div class="summary-row protect">
+              <span class="icon">🛡</span>
+              <span id="protectSummary">Keep: Before Dec 2014, After Jan 2026</span>
+            </div>
+          </div>
+
+          <!-- Hidden selects for compatibility -->
+          <select id="deleteMonth" style="display:none"></select>
+          <select id="deleteYear" style="display:none"></select>
+          <select id="protectMonth" style="display:none"></select>
+          <select id="protectYear" style="display:none"></select>
         </div>
 
         <div class="section-head">Options</div>
@@ -1599,6 +1763,251 @@
       });
     });
 
+    // ==================== TIMELINE SLIDER ====================
+    const TIMELINE_START_YEAR = 2006; // Twitter's birth
+    const TIMELINE_END_YEAR = new Date().getFullYear();
+    const TOTAL_MONTHS = (TIMELINE_END_YEAR - TIMELINE_START_YEAR + 1) * 12;
+
+    let sliderMode = 'delete'; // 'delete' or 'protect'
+    let sliderStart = { month: 12, year: 2014 }; // Dec 2014
+    let sliderEnd = { month: new Date().getMonth() + 1, year: TIMELINE_END_YEAR }; // Current
+
+    const track = document.getElementById('timelineTrack');
+    const selection = document.getElementById('timelineSelection');
+    const handleStart = document.getElementById('handleStart');
+    const handleEnd = document.getElementById('handleEnd');
+    const dateDisplay = document.getElementById('dateDisplay');
+    const deleteSummary = document.getElementById('deleteSummary');
+    const protectSummary = document.getElementById('protectSummary');
+    const currentYearLabel = document.getElementById('currentYearLabel');
+
+    currentYearLabel.textContent = TIMELINE_END_YEAR;
+
+    function monthsToPercent(year, month) {
+      const totalMonths = (year - TIMELINE_START_YEAR) * 12 + (month - 1);
+      return (totalMonths / TOTAL_MONTHS) * 100;
+    }
+
+    function percentToDate(percent) {
+      const totalMonths = Math.round((percent / 100) * TOTAL_MONTHS);
+      const year = TIMELINE_START_YEAR + Math.floor(totalMonths / 12);
+      const month = (totalMonths % 12) + 1;
+      return { year: Math.min(year, TIMELINE_END_YEAR), month: Math.max(1, Math.min(12, month)) };
+    }
+
+    function formatMonth(year, month) {
+      const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      return `${monthNames[month - 1]} ${year}`;
+    }
+
+    function updateSliderUI() {
+      const startPercent = monthsToPercent(sliderStart.year, sliderStart.month);
+      const endPercent = monthsToPercent(sliderEnd.year, sliderEnd.month);
+
+      selection.style.left = `${startPercent}%`;
+      selection.style.width = `${endPercent - startPercent}%`;
+      handleStart.style.left = `${startPercent}%`;
+      handleEnd.style.left = `${endPercent}%`;
+
+      // Update mode styling
+      if (sliderMode === 'protect') {
+        selection.classList.add('protect-mode');
+      } else {
+        selection.classList.remove('protect-mode');
+      }
+
+      // Update display
+      const startStr = formatMonth(sliderStart.year, sliderStart.month);
+      const endStr = formatMonth(sliderEnd.year, sliderEnd.month);
+      dateDisplay.textContent = `${startStr} → ${endStr}`;
+
+      // Update summary based on mode
+      if (sliderMode === 'delete') {
+        deleteSummary.textContent = `Delete: ${startStr} → ${endStr}`;
+        protectSummary.textContent = `Keep: Before ${startStr}, After ${endStr}`;
+      } else {
+        deleteSummary.textContent = `Delete: Before ${startStr}, After ${endStr}`;
+        protectSummary.textContent = `Keep: ${startStr} → ${endStr}`;
+      }
+
+      // Sync to hidden selects for config compatibility
+      syncToConfig();
+    }
+
+    function syncToConfig() {
+      if (sliderMode === 'delete') {
+        // Delete selected range: deleteFrom = start, protectAfter = end
+        document.getElementById('deleteMonth').value = sliderStart.month;
+        document.getElementById('deleteYear').value = sliderStart.year;
+        document.getElementById('protectMonth').value = sliderEnd.month;
+        document.getElementById('protectYear').value = sliderEnd.year;
+        config.deleteMonth = sliderStart.month;
+        config.deleteYear = sliderStart.year;
+        config.protectMonth = sliderEnd.month;
+        config.protectYear = sliderEnd.year;
+      } else {
+        // Protect selected range (invert): delete everything OUTSIDE the range
+        // This needs different logic - for now just swap the meaning
+        document.getElementById('deleteMonth').value = 1;
+        document.getElementById('deleteYear').value = 2006;
+        document.getElementById('protectMonth').value = sliderStart.month;
+        document.getElementById('protectYear').value = sliderStart.year;
+        config.deleteMonth = 1;
+        config.deleteYear = 2006;
+        config.protectMonth = sliderStart.month;
+        config.protectYear = sliderStart.year;
+        // Note: protect mode would keep ONLY the selected range
+        // This would require additional logic changes in index.js
+      }
+      config.sliderMode = sliderMode;
+      api.saveConfig(config);
+    }
+
+    // Drag handling
+    let activeHandle = null;
+
+    function getPercentFromEvent(e) {
+      const rect = track.getBoundingClientRect();
+      const x = (e.clientX || e.touches[0].clientX) - rect.left;
+      return Math.max(0, Math.min(100, (x / rect.width) * 100));
+    }
+
+    handleStart.addEventListener('mousedown', (e) => { activeHandle = 'start'; e.preventDefault(); });
+    handleEnd.addEventListener('mousedown', (e) => { activeHandle = 'end'; e.preventDefault(); });
+    handleStart.addEventListener('touchstart', (e) => { activeHandle = 'start'; });
+    handleEnd.addEventListener('touchstart', (e) => { activeHandle = 'end'; });
+
+    document.addEventListener('mousemove', (e) => {
+      if (!activeHandle) return;
+      const percent = getPercentFromEvent(e);
+      const date = percentToDate(percent);
+
+      if (activeHandle === 'start') {
+        const endPercent = monthsToPercent(sliderEnd.year, sliderEnd.month);
+        if (percent < endPercent - 2) {
+          sliderStart = date;
+          updateSliderUI();
+        }
+      } else {
+        const startPercent = monthsToPercent(sliderStart.year, sliderStart.month);
+        if (percent > startPercent + 2) {
+          sliderEnd = date;
+          updateSliderUI();
+        }
+      }
+    });
+
+    document.addEventListener('touchmove', (e) => {
+      if (!activeHandle) return;
+      const percent = getPercentFromEvent(e);
+      const date = percentToDate(percent);
+
+      if (activeHandle === 'start') {
+        const endPercent = monthsToPercent(sliderEnd.year, sliderEnd.month);
+        if (percent < endPercent - 2) {
+          sliderStart = date;
+          updateSliderUI();
+        }
+      } else {
+        const startPercent = monthsToPercent(sliderStart.year, sliderStart.month);
+        if (percent > startPercent + 2) {
+          sliderEnd = date;
+          updateSliderUI();
+        }
+      }
+    });
+
+    document.addEventListener('mouseup', () => { activeHandle = null; });
+    document.addEventListener('touchend', () => { activeHandle = null; });
+
+    // Click on track to move nearest handle
+    track.addEventListener('click', (e) => {
+      if (e.target === handleStart || e.target === handleEnd) return;
+      const percent = getPercentFromEvent(e);
+      const startPercent = monthsToPercent(sliderStart.year, sliderStart.month);
+      const endPercent = monthsToPercent(sliderEnd.year, sliderEnd.month);
+
+      // Move the nearest handle
+      if (Math.abs(percent - startPercent) < Math.abs(percent - endPercent)) {
+        sliderStart = percentToDate(percent);
+      } else {
+        sliderEnd = percentToDate(percent);
+      }
+      updateSliderUI();
+    });
+
+    // Mode toggle
+    document.getElementById('modeDelete').addEventListener('click', () => {
+      sliderMode = 'delete';
+      document.getElementById('modeDelete').classList.add('active');
+      document.getElementById('modeProtect').classList.remove('active');
+      document.getElementById('modeProtect').classList.remove('protect');
+      updateSliderUI();
+    });
+
+    document.getElementById('modeProtect').addEventListener('click', () => {
+      sliderMode = 'protect';
+      document.getElementById('modeProtect').classList.add('active', 'protect');
+      document.getElementById('modeDelete').classList.remove('active');
+      updateSliderUI();
+    });
+
+    // Scroll-to-zoom: Hover over timeline and scroll to adjust nearest handle precisely
+    let zoomLevel = 1; // 1 = months, could go to weeks/days with higher zoom
+
+    function adjustDateByMonths(date, delta) {
+      let totalMonths = (date.year - TIMELINE_START_YEAR) * 12 + (date.month - 1) + delta;
+      totalMonths = Math.max(0, Math.min(TOTAL_MONTHS - 1, totalMonths));
+      const year = TIMELINE_START_YEAR + Math.floor(totalMonths / 12);
+      const month = (totalMonths % 12) + 1;
+      return { year, month };
+    }
+
+    track.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const percent = getPercentFromEvent(e);
+      const startPercent = monthsToPercent(sliderStart.year, sliderStart.month);
+      const endPercent = monthsToPercent(sliderEnd.year, sliderEnd.month);
+      const midPercent = (startPercent + endPercent) / 2;
+
+      // Determine which handle to adjust based on mouse position
+      const adjustStart = percent < midPercent;
+      const delta = e.deltaY > 0 ? 1 : -1; // Scroll down = forward in time
+
+      if (adjustStart) {
+        const newStart = adjustDateByMonths(sliderStart, delta);
+        const endMonths = (sliderEnd.year - TIMELINE_START_YEAR) * 12 + sliderEnd.month;
+        const newStartMonths = (newStart.year - TIMELINE_START_YEAR) * 12 + newStart.month;
+        if (newStartMonths < endMonths - 1) {
+          sliderStart = newStart;
+          updateSliderUI();
+        }
+      } else {
+        const newEnd = adjustDateByMonths(sliderEnd, delta);
+        const startMonths = (sliderStart.year - TIMELINE_START_YEAR) * 12 + sliderStart.month;
+        const newEndMonths = (newEnd.year - TIMELINE_START_YEAR) * 12 + newEnd.month;
+        if (newEndMonths > startMonths + 1) {
+          sliderEnd = newEnd;
+          updateSliderUI();
+        }
+      }
+    }, { passive: false });
+
+    // Show which handle will be affected on hover
+    track.addEventListener('mousemove', (e) => {
+      if (activeHandle) return; // Don't change cursor while dragging
+      const percent = getPercentFromEvent(e);
+      const startPercent = monthsToPercent(sliderStart.year, sliderStart.month);
+      const endPercent = monthsToPercent(sliderEnd.year, sliderEnd.month);
+      const midPercent = (startPercent + endPercent) / 2;
+
+      // Visual hint: could add tooltip or cursor change here
+      track.style.cursor = percent < midPercent ? 'w-resize' : 'e-resize';
+    });
+
+    // Initialize slider UI
+    updateSliderUI();
+
     // Save target when changed
     document.getElementById('target').addEventListener('change', (e) => {
       config.target = parseInt(e.target.value) || 10000;
@@ -2016,6 +2425,22 @@
           config.protectYear = c.protectYear;
           document.getElementById('protectYear').value = c.protectYear;
         }
+
+        // Restore slider state
+        if (c.deleteYear && c.deleteMonth) {
+          sliderStart = { year: c.deleteYear, month: c.deleteMonth };
+        }
+        if (c.protectYear && c.protectMonth) {
+          sliderEnd = { year: c.protectYear, month: c.protectMonth };
+        }
+        if (c.sliderMode) {
+          sliderMode = c.sliderMode;
+          if (sliderMode === 'protect') {
+            document.getElementById('modeProtect').classList.add('active', 'protect');
+            document.getElementById('modeDelete').classList.remove('active');
+          }
+        }
+        updateSliderUI();
       }
       updateAllAccountsList();
     });

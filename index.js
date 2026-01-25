@@ -709,13 +709,14 @@ async function shouldDeleteByDate(card) {
     return false;
   }
 
-  // Delete tweets before the delete date
-  if (tweetDate < DELETE_BEFORE) {
+  // Delete tweets FROM the delete date onwards (up to protection date)
+  if (tweetDate >= DELETE_BEFORE) {
     log("delete", chalk.red(`${dateStr} → DELETE`), chalk.gray(`"${preview}"`));
     return true;
   }
 
-  log("skip", chalk.gray(`${dateStr} Outside range`), chalk.gray(`"${preview}"`));
+  // Tweets older than delete date are skipped (kept)
+  log("skip", chalk.gray(`${dateStr} Too old, kept`), chalk.gray(`"${preview}"`));
   return false;
 }
 
@@ -861,7 +862,7 @@ async function collectWorklist(page, want, seen) {
 async function processTab(page, tabName, removed, startTime) {
   console.log("");
   log("tab", chalk.magenta.bold(`Processing ${tabName}`));
-  log("info", `DELETE before ${formatDate(DELETE_BEFORE)}, PROTECT after ${formatDate(PROTECT_AFTER)}`);
+  log("info", `DELETE from ${formatDate(DELETE_BEFORE)} to ${formatDate(PROTECT_AFTER)}, PROTECT after ${formatDate(PROTECT_AFTER)}`);
 
   await gotoProfileTab(page, tabName);
 
