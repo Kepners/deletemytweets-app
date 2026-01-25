@@ -1129,7 +1129,7 @@
 
         <div class="section-head">Anti-Detection</div>
         <div class="glass-card">
-          <div class="card-row">
+          <div class="card-row" id="firefoxToggleRow">
             <span class="card-label">Use Firefox</span>
             <div class="toggle on" data-setting="useFirefox"></div>
           </div>
@@ -1726,12 +1726,15 @@
           config.useFirefox = t.classList.contains('on');
           // Show/hide Firefox options (proxy, etc.)
           const firefoxOpts = document.getElementById('firefoxOptions');
+          const firefoxRow = document.getElementById('firefoxToggleRow');
           if (config.useFirefox) {
             firefoxOpts.style.maxHeight = '200px';
             firefoxOpts.style.opacity = '1';
+            firefoxRow.style.borderBottom = '1px solid var(--white-10)';
           } else {
             firefoxOpts.style.maxHeight = '0';
             firefoxOpts.style.opacity = '0';
+            firefoxRow.style.borderBottom = 'none';
           }
         }
         // Save settings
@@ -2401,12 +2404,15 @@
           document.querySelector('[data-setting="useFirefox"]').classList.toggle('on', c.useFirefox);
           // Show/hide Firefox options
           const firefoxOpts = document.getElementById('firefoxOptions');
+          const firefoxRow = document.getElementById('firefoxToggleRow');
           if (c.useFirefox) {
             firefoxOpts.style.maxHeight = '200px';
             firefoxOpts.style.opacity = '1';
+            firefoxRow.style.borderBottom = '1px solid var(--white-10)';
           } else {
             firefoxOpts.style.maxHeight = '0';
             firefoxOpts.style.opacity = '0';
+            firefoxRow.style.borderBottom = 'none';
           }
         }
         if (c.proxy) {

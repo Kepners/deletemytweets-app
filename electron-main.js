@@ -9,9 +9,9 @@ function createWindow() {
   // Create the browser window
   mainWindow = new BrowserWindow({
     width: 420,
-    height: 980,
+    height: 1050,
     minWidth: 380,
-    minHeight: 900,
+    minHeight: 950,
     icon: path.join(__dirname, 'icon.ico'),
     frame: false, // Frameless for custom titlebar
     transparent: true,
