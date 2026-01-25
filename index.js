@@ -531,7 +531,7 @@ async function ensureLoggedIn(page, context) {
       // Click logout confirm if present
       const logoutBtn = page.locator('[data-testid="confirmationSheetConfirm"]');
       if (await logoutBtn.count() > 0) {
-        await logoutBtn.click().catch(() => {});
+        await logoutBtn.click({ timeout: 5000 }).catch(() => {});
         await page.waitForTimeout(2000);
       }
       await page.goto('https://x.com/login', { waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
@@ -762,7 +762,7 @@ async function openMenu(page, card) {
     'div[aria-haspopup="menu"][role="button"]'
   ].join(", "));
   if (!(await more.count())) return false;
-  await more.first().click({ delay: 10 }).catch(() => {});
+  await more.first().click({ delay: 10, timeout: 5000 }).catch(() => {});
   await page.waitForTimeout(150);
   return true;
 }
@@ -785,7 +785,7 @@ async function clickMenuItem(page, regex) {
   const n = await items.count();
   for (let i = 0; i < n; i++) {
     const t = ((await items.nth(i).innerText().catch(() => "")) || "").trim();
-    if (regex.test(t)) { await items.nth(i).click({ delay: 10 }).catch(() => {}); return true; }
+    if (regex.test(t)) { await items.nth(i).click({ delay: 10, timeout: 5000 }).catch(() => {}); return true; }
   }
   return false;
 }
@@ -797,7 +797,7 @@ async function confirmDeleteIfNeeded(page) {
     'button:has-text("Delete")',
     'div[role="button"]:has-text("Delete")'
   ].join(", ")).first();
-  if (await btn.count()) await btn.click({ delay: 10 }).catch(() => {});
+  if (await btn.count()) await btn.click({ delay: 10, timeout: 5000 }).catch(() => {});
 }
 
 async function tryDelete(page, card) {
@@ -886,11 +886,20 @@ async function processTab(page, tabName, removed, startTime) {
           if (isAborted() || removed.count >= TARGET) break;
 
           try {
-            await card.scrollIntoViewIfNeeded().catch(() => {});
+            // Timeout scroll to prevent hanging on video tweets
+            await Promise.race([
+              card.scrollIntoViewIfNeeded(),
+              new Promise((_, reject) => setTimeout(() => reject(new Error('scroll timeout')), 3000))
+            ]).catch(() => {});
             await page.waitForTimeout(100);
 
             let res = await tryDelete(page, card);
             if (!res.ok) res = await tryUndoRepost(page, card);
+
+            // Log if tweet couldn't be deleted (might be someone else's repost)
+            if (!res.ok) {
+              log("info", `Skipped: ${res.reason} (may be someone else's content)`);
+            }
 
             if (res.ok) {
               removed.count++;
