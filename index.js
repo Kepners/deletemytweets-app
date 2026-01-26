@@ -1092,11 +1092,24 @@ async function tryUndoRepost(page, card) {
   if (!HANDLE_REPOSTS) return { ok: false, reason: "repost-disabled" };
 
   // Find the repost/unretweet button - green when active
-  const unretweetBtn = card.locator('[data-testid="unretweet"]').first();
-  const retweetBtn = card.locator('[data-testid="retweet"]').first();
+  // First try within card scope, then try page-level for retweets where button may be outside card
+  let unretweetBtn = card.locator('[data-testid="unretweet"]').first();
+  let retweetBtn = card.locator('[data-testid="retweet"]').first();
 
   // Check for the unretweet button (indicates this is a repost)
-  const unretweetCount = await withTimeout(unretweetBtn.count(), 2000, 0);
+  let unretweetCount = await withTimeout(unretweetBtn.count(), 2000, 0);
+
+  // If not found in card, the card might be the inner tweet - try page level
+  // Look for unretweet button that's visible (in viewport)
+  if (unretweetCount === 0) {
+    const pageUnretweet = page.locator('[data-testid="unretweet"]:visible').first();
+    const pageUnretweetCount = await withTimeout(pageUnretweet.count(), 1000, 0);
+    if (pageUnretweetCount > 0) {
+      log("info", "Found unretweet button at page level (retweet card)");
+      unretweetBtn = pageUnretweet;
+      unretweetCount = 1;
+    }
+  }
 
   if (unretweetCount > 0) {
     // Found unretweet button - click it to undo
@@ -1241,20 +1254,39 @@ async function processTab(page, tabName, removed, startTime) {
             await pauseAllVideos(page);
             await page.waitForTimeout(100);
 
-            let deleteRes = await tryDelete(page, card);
-            let res = deleteRes;
+            // Check if this is a retweet - if so, try unretweet FIRST
+            // Retweets don't have "Delete" in caret menu, they need unretweet button
+            const isRetweet = await isUserRepost(card);
+            let res;
+            let deleteRes = { ok: false, reason: "not-tried" };
+            let repostRes = { ok: false, reason: "not-tried" };
 
-            if (!deleteRes.ok) {
-              // Try repost undo as fallback
-              res = await tryUndoRepost(page, card);
+            if (isRetweet && HANDLE_REPOSTS) {
+              // Retweet: try unretweet first, then delete as fallback
+              repostRes = await tryUndoRepost(page, card);
+              res = repostRes;
+              if (!repostRes.ok) {
+                deleteRes = await tryDelete(page, card);
+                res = deleteRes;
+              }
+            } else {
+              // Regular tweet: try delete first, then unretweet as fallback
+              deleteRes = await tryDelete(page, card);
+              res = deleteRes;
+              if (!deleteRes.ok && HANDLE_REPOSTS) {
+                repostRes = await tryUndoRepost(page, card);
+                res = repostRes;
+              }
             }
 
             // Log if tweet couldn't be deleted - show both reasons
             if (!res.ok) {
-              if (deleteRes.reason !== res.reason) {
-                log("warn", `Skipped: delete failed (${deleteRes.reason}), repost failed (${res.reason})`);
+              if (deleteRes.reason !== "not-tried" && repostRes.reason !== "not-tried" && deleteRes.reason !== repostRes.reason) {
+                log("warn", `Skipped: delete failed (${deleteRes.reason}), repost failed (${repostRes.reason})`);
+              } else if (deleteRes.reason !== "not-tried") {
+                log("info", `Skipped: ${deleteRes.reason}`);
               } else {
-                log("info", `Skipped: ${res.reason}`);
+                log("info", `Skipped: ${repostRes.reason}`);
               }
             }
 
