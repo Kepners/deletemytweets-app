@@ -1182,7 +1182,10 @@ async function collectWorklist(page, want, seen) {
 
     // Only check ownership (which may open menu) for tweets we want to delete
     if (await isYours(page, card)) {
-      mine.push(card);
+      // Detect retweet status NOW while card is fresh - store it with the card
+      // This prevents issues with stale locators later in the deletion loop
+      const isRetweet = await isUserRepost(card);
+      mine.push({ card, isRetweet });
     }
   }
   return mine;
@@ -1237,8 +1240,12 @@ async function processTab(page, tabName, removed, startTime) {
         noLoadCount = 0;
 
         // Delete each tweet found
-        for (const card of work) {
+        for (const workItem of work) {
           if (isAborted() || removed.count >= TARGET) break;
+
+          // Extract card and pre-computed isRetweet from worklist
+          const card = workItem.card;
+          const isRetweet = workItem.isRetweet;
 
           try {
             // Kill any videos BEFORE scrolling to prevent network stalling
@@ -1254,15 +1261,15 @@ async function processTab(page, tabName, removed, startTime) {
             await pauseAllVideos(page);
             await page.waitForTimeout(100);
 
-            // Check if this is a retweet - if so, try unretweet FIRST
+            // Use pre-computed isRetweet from worklist (detected when card was fresh)
             // Retweets don't have "Delete" in caret menu, they need unretweet button
-            const isRetweet = await isUserRepost(card);
             let res;
             let deleteRes = { ok: false, reason: "not-tried" };
             let repostRes = { ok: false, reason: "not-tried" };
 
             if (isRetweet && HANDLE_REPOSTS) {
               // Retweet: try unretweet first, then delete as fallback
+              log("info", "Detected as retweet - trying unretweet first");
               repostRes = await tryUndoRepost(page, card);
               res = repostRes;
               if (!repostRes.ok) {
