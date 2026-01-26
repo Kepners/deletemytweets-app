@@ -1118,13 +1118,15 @@ async function processTab(page, tabName, removed, startTime) {
   let lastProgressTime = Date.now();
   let sweepCount = 0;
   const MAX_SWEEPS = 50;  // Max full sweeps before giving up
+  const globalSeen = new Set();  // Track ALL tweets seen across entire session
+  let loopDetectCount = 0;  // Count consecutive loops without progress
 
   // Outer loop: Full sweeps from top to bottom
   while (removed.count < TARGET && !isAborted() && sweepCount < MAX_SWEEPS) {
     sweepCount++;
     let deletedThisSweep = 0;
     let noLoadCount = 0;
-    const seen = new Set();  // Fresh seen set each sweep
+    const seenBeforeSweep = globalSeen.size;  // Track for loop detection
 
     // Go to top for each sweep
     log("info", `Starting sweep ${sweepCount}...`);
@@ -1140,11 +1142,11 @@ async function processTab(page, tabName, removed, startTime) {
       }
 
       // Find deletable tweets in current view
-      const work = await collectWorklist(page, Math.min(10, TARGET - removed.count), seen);
+      const work = await collectWorklist(page, Math.min(10, TARGET - removed.count), globalSeen);
 
       // Debug: show what we found
       const totalCards = await allCards(page).count();
-      log("info", `Found ${work.length} deletable of ${totalCards} total cards (${seen.size} scanned)`);
+      log("info", `Found ${work.length} deletable of ${totalCards} total cards (${globalSeen.size} scanned)`);
 
       // Pause videos and dismiss popups to prevent blocking
       await pauseAllVideos(page);
@@ -1229,17 +1231,33 @@ async function processTab(page, tabName, removed, startTime) {
       }
     }
 
-    log("info", `Sweep ${sweepCount} complete: ${deletedThisSweep} deleted this sweep`);
+    const newTweetsSeen = globalSeen.size - seenBeforeSweep;
+    log("info", `Sweep ${sweepCount} complete: ${deletedThisSweep} deleted, ${newTweetsSeen} new tweets scanned (${globalSeen.size} total)`);
 
-    // If no deletions this sweep, we might be done
-    if (deletedThisSweep === 0) {
-      // Try refreshing page once to see if more tweets appear
-      if (sweepCount % 3 === 0) {
-        log("info", "No deletions - refreshing page to check for more...");
-        await page.reload({ waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
-        await page.waitForTimeout(3000);
-      } else {
-        // Two consecutive empty sweeps = probably done
+    // Detect timeline looping - if no new tweets AND no deletions, timeline may have reset
+    if (newTweetsSeen === 0 && deletedThisSweep === 0) {
+      loopDetectCount++;
+      log("warn", `Timeline may be looping (${loopDetectCount}/3 consecutive empty sweeps)`);
+
+      if (loopDetectCount >= 3) {
+        log("info", "Timeline appears to be looping with no new content. Done with tab.");
+        break;
+      }
+
+      // Try refreshing page to break out of loop
+      log("info", "Refreshing page to attempt breaking out of loop...");
+      await page.reload({ waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
+      await page.waitForTimeout(3000);
+    } else if (deletedThisSweep === 0 && newTweetsSeen > 0) {
+      // We're seeing new tweets but none are deletable - keep going
+      loopDetectCount = 0;
+      log("info", "New tweets found but none deletable in range. Continuing...");
+    } else {
+      // Made progress - reset loop counter
+      loopDetectCount = 0;
+
+      // If no deletions this sweep but we saw new tweets, might be done
+      if (deletedThisSweep === 0) {
         log("info", "No more deletable tweets found. Done with tab.");
         break;
       }
