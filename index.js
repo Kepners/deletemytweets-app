@@ -415,6 +415,19 @@ async function withTimeout(promise, ms = 3000, fallback = null) {
   ]);
 }
 
+// Pause all videos on page to prevent resource drain and stalling
+async function pauseAllVideos(page) {
+  try {
+    await page.evaluate(() => {
+      document.querySelectorAll('video').forEach(v => {
+        v.pause();
+        v.currentTime = 0;
+        v.preload = 'none';
+      });
+    });
+  } catch {}
+}
+
 // ================= AUTH =================
 async function isLoggedIn(context) {
   try { return (await context.cookies()).some(c => c.name.toLowerCase() === "auth_token"); }
@@ -960,6 +973,9 @@ async function processTab(page, tabName, removed, startTime) {
       const totalCards = await allCards(page).count();
       log("info", `Found ${work.length} deletable of ${totalCards} total cards (${seen.size} scanned)`);
 
+      // Pause any playing videos to prevent stalling
+      await pauseAllVideos(page);
+
       if (work.length > 0) {
         noLoadCount = 0;
 
@@ -1016,6 +1032,9 @@ async function processTab(page, tabName, removed, startTime) {
 
       const afterCount = await allCards(page).count();
       console.log(`[SCROLL] ${beforeCount} → ${afterCount} cards loaded`);
+
+      // Pause any new videos that loaded
+      await pauseAllVideos(page);
 
       // Check if we hit the bottom (no new tweets loading)
       if (afterCount <= beforeCount) {
@@ -1076,6 +1095,7 @@ async function run() {
     "--disable-backgrounding-occluded-windows",
     "--disable-renderer-backgrounding",
     "--disable-background-timer-throttling",
+    "--autoplay-policy=user-gesture-required",  // Prevent video autoplay causing hangs
     "--test-type",  // Suppress "unsupported command-line flag" warnings
     "--no-sandbox"  // Required for some environments
   ];
