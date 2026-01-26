@@ -434,6 +434,54 @@ async function isLoggedIn(context) {
   catch { return false; }
 }
 
+// Sign out of X/Twitter completely
+async function signOut(page, context) {
+  log("info", "Signing out of X...");
+  try {
+    // Clear all cookies first
+    await context.clearCookies();
+
+    // Navigate to logout page
+    await page.goto('https://x.com/logout', { waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
+    await page.waitForTimeout(1500);
+
+    // Click the logout confirmation button if present
+    const confirmSelectors = [
+      '[data-testid="confirmationSheetConfirm"]',
+      'button:has-text("Log out")',
+      '[role="button"]:has-text("Log out")'
+    ];
+
+    for (const selector of confirmSelectors) {
+      const btn = page.locator(selector);
+      const count = await btn.count().catch(() => 0);
+      if (count > 0) {
+        await btn.first().click({ timeout: 5000 }).catch(() => {});
+        await page.waitForTimeout(2000);
+        break;
+      }
+    }
+
+    // Clear cookies again after logout
+    await context.clearCookies();
+
+    // Verify we're logged out
+    const stillLoggedIn = await isLoggedIn(context);
+    if (stillLoggedIn) {
+      log("warn", "Cookies still present after logout - clearing again");
+      await context.clearCookies();
+    }
+
+    log("success", "Signed out successfully");
+    return true;
+  } catch (err) {
+    log("warn", `Sign out error: ${err?.message || err}`);
+    // Still try to clear cookies
+    await context.clearCookies().catch(() => {});
+    return false;
+  }
+}
+
 // Get the currently logged-in account handle from the sidebar
 async function getLoggedInHandle(page) {
   try {
@@ -591,23 +639,14 @@ async function ensureLoggedIn(page, context) {
       try { await context.storageState({ path: storagePath }); } catch {}
       return true;
     } else {
-      // Logged in but wrong account - clear cookies and force re-login
+      // Logged in but wrong account - sign out and force re-login
       log("warn", chalk.yellow(`Logged in as wrong account! Need @${PROFILE_HANDLE}`));
-      log("info", "Clearing session and opening login page...");
       clearSession(PROFILE_HANDLE);
 
-      // Clear all cookies to force fresh login
-      await context.clearCookies();
+      // Use proper sign out
+      await signOut(page, context);
 
-      // Navigate to logout then login
-      await page.goto('https://x.com/logout', { waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
-      await page.waitForTimeout(1000);
-      // Click logout confirm if present
-      const logoutBtn = page.locator('[data-testid="confirmationSheetConfirm"]');
-      if (await logoutBtn.count() > 0) {
-        await logoutBtn.click({ timeout: 5000 }).catch(() => {});
-        await page.waitForTimeout(2000);
-      }
+      // Navigate to login page
       await page.goto('https://x.com/login', { waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
     }
   } else {
