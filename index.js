@@ -938,21 +938,53 @@ async function shouldDeleteByDate(card) {
 // Check if this card shows a repost by the current user
 async function isUserRepost(card) {
   try {
-    // Look for "Reposted" or "retweeted" indicator with user's link
+    // Method 1: Check for unretweet button (green repost icon) - most reliable
+    const repostBtn = card.locator('[data-testid="unretweet"]');
+    const repostCount = await withTimeout(repostBtn.count(), 1500, 0);
+    if (repostCount > 0) {
+      console.log("[DEBUG] isUserRepost: found unretweet button in card");
+      return true;
+    }
+
+    // Method 2: Check for social context (repost indicator at top of card)
+    // Works across languages - any social context with repost icon suggests it's a repost
     const socialContext = card.locator('[data-testid="socialContext"]');
     const contextCount = await withTimeout(socialContext.count(), 1000, 0);
     if (contextCount > 0) {
       const contextText = await withTimeout(socialContext.first().innerText().catch(() => ""), 1000, "");
-      // Check if it says "You reposted" or has the user's handle
-      if (contextText && (contextText.toLowerCase().includes('repost') || contextText.toLowerCase().includes('retweet'))) {
+      // Check multiple language patterns
+      const repostPatterns = [
+        'repost', 'retweet', 'republish',  // English
+        'repost', 'retuite',                // Spanish variants
+        'reposté', 'retweeté', 'republié',  // French
+        'retweetet', 'geteilt',             // German
+        'リツイート', 'リポスト',             // Japanese
+        '转推', '轉推'                       // Chinese
+      ];
+      const textLower = contextText.toLowerCase();
+      if (repostPatterns.some(p => textLower.includes(p))) {
+        console.log(`[DEBUG] isUserRepost: social context matches pattern: "${contextText}"`);
+        return true;
+      }
+      // Also check if social context has user's profile link (indicates "You reposted")
+      const userLink = socialContext.locator(`a[href="/${PROFILE_HANDLE}"]`);
+      if (await withTimeout(userLink.count(), 500, 0) > 0) {
+        console.log("[DEBUG] isUserRepost: social context has user's profile link");
         return true;
       }
     }
-    // Also check for the repost icon being highlighted (green)
-    const repostBtn = card.locator('[data-testid="unretweet"]');
-    const repostCount = await withTimeout(repostBtn.count(), 1000, 0);
-    return repostCount > 0;
-  } catch {
+
+    // Method 3: Check for repost icon SVG (the rotating arrows icon when highlighted)
+    const repostIcon = card.locator('[data-testid="unretweet"] svg, [data-testid="retweet"][style*="color"]');
+    const iconCount = await withTimeout(repostIcon.count(), 500, 0);
+    if (iconCount > 0) {
+      console.log("[DEBUG] isUserRepost: found repost icon");
+      return true;
+    }
+
+    return false;
+  } catch (e) {
+    console.log(`[DEBUG] isUserRepost error: ${e?.message || e}`);
     return false;
   }
 }
