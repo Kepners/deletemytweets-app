@@ -68,6 +68,36 @@ if (IS_CLI) {
   xGradient = deleteGradient = successGradient = { multiline: (s) => s };
 }
 
+// ================= BROWSER CHECK =================
+// Check if Edge or Chrome is installed for Playwright to use
+function getBrowserChannel() {
+  const edgePaths = [
+    path.join(process.env.PROGRAMFILES || '', 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+    path.join(process.env['PROGRAMFILES(X86)'] || '', 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+    path.join(process.env.LOCALAPPDATA || '', 'Microsoft', 'Edge', 'Application', 'msedge.exe')
+  ];
+
+  const chromePaths = [
+    path.join(process.env.PROGRAMFILES || '', 'Google', 'Chrome', 'Application', 'chrome.exe'),
+    path.join(process.env['PROGRAMFILES(X86)'] || '', 'Google', 'Chrome', 'Application', 'chrome.exe'),
+    path.join(process.env.LOCALAPPDATA || '', 'Google', 'Chrome', 'Application', 'chrome.exe')
+  ];
+
+  // Check for Edge first (preferred)
+  for (const p of edgePaths) {
+    if (fs.existsSync(p)) return 'msedge';
+  }
+
+  // Fallback to Chrome
+  for (const p of chromePaths) {
+    if (fs.existsSync(p)) return 'chrome';
+  }
+
+  return null; // No supported browser found
+}
+
+let BROWSER_CHANNEL = null; // Will be set at startup
+
 function printHeader() {
   if (!IS_CLI) return;
   console.clear();
@@ -1327,9 +1357,22 @@ async function run() {
   });
 
   const launchSpinner = ora({
-    text: chalk.cyan('Launching browser...'),
+    text: chalk.cyan('Checking for browser...'),
     spinner: 'dots12'
   }).start();
+
+  // Check for supported browser (Edge or Chrome)
+  BROWSER_CHANNEL = getBrowserChannel();
+  if (!BROWSER_CHANNEL) {
+    launchSpinner.fail(chalk.red('No supported browser found!'));
+    log("error", "Delete My Tweets requires Microsoft Edge or Google Chrome to be installed.");
+    log("info", "Please install Edge or Chrome and try again.");
+    log("info", "Download Edge: https://www.microsoft.com/edge");
+    log("info", "Download Chrome: https://www.google.com/chrome");
+    return;
+  }
+
+  launchSpinner.text = chalk.cyan(`Launching ${BROWSER_CHANNEL === 'msedge' ? 'Edge' : 'Chrome'}...`);
 
   let context, browser, page;
 
@@ -1351,7 +1394,7 @@ async function run() {
     log("info", "Using private browser mode (fresh session)");
     browser = await chromium.launch({
       headless: HEADLESS,
-      channel: 'msedge',
+      channel: BROWSER_CHANNEL,
       args: browserArgs,
       ignoreDefaultArgs: ["--enable-automation"]
     });
@@ -1363,7 +1406,7 @@ async function run() {
       storageState: useStorage
     });
     page = await context.newPage();
-  } else {
+  } else if (BROWSER_CHANNEL === 'msedge') {
     // Try to use Edge profile (has extensions like 1Password)
     const userDataDir = process.env.EDGE_USER_DATA || path.join(process.env.LOCALAPPDATA || '', 'Microsoft', 'Edge', 'User Data');
     const profileDir = process.env.EDGE_PROFILE || 'Default';
@@ -1373,7 +1416,7 @@ async function run() {
         path.join(userDataDir, profileDir),
         {
           headless: HEADLESS,
-          channel: 'msedge',
+          channel: BROWSER_CHANNEL,
           args: [
             ...browserArgs,
             "--no-first-run",
@@ -1391,7 +1434,7 @@ async function run() {
       log("warn", "Edge may be open. Using fresh browser (close Edge for full access)");
       browser = await chromium.launch({
         headless: HEADLESS,
-        channel: 'msedge',
+        channel: BROWSER_CHANNEL,
         args: browserArgs,
         ignoreDefaultArgs: ["--enable-automation"]
       });
@@ -1403,6 +1446,22 @@ async function run() {
       });
       page = await context.newPage();
     }
+  } else {
+    // Chrome doesn't support profile mode the same way, use fresh browser
+    log("info", "Using Chrome (fresh session)");
+    browser = await chromium.launch({
+      headless: HEADLESS,
+      channel: BROWSER_CHANNEL,
+      args: browserArgs,
+      ignoreDefaultArgs: ["--enable-automation"]
+    });
+    const handleStorage = getStoragePath(PROFILE_HANDLE);
+    const useStorage = isSessionValid(PROFILE_HANDLE) ? handleStorage : undefined;
+
+    context = await browser.newContext({
+      storageState: useStorage
+    });
+    page = await context.newPage();
   }
 
   launchSpinner.succeed(chalk.green('Browser ready'));
