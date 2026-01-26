@@ -434,6 +434,42 @@ async function isLoggedIn(context) {
   catch { return false; }
 }
 
+// Get the currently logged-in account handle from the sidebar
+async function getLoggedInHandle(page) {
+  try {
+    // Look for the account switcher in the sidebar which shows current handle
+    const accountSelectors = [
+      '[data-testid="SideNav_AccountSwitcher_Button"] [dir="ltr"] span',  // Sidebar account button
+      '[data-testid="AccountSwitcher"] span[dir="ltr"]',
+      'nav [data-testid="AppTabBar_Profile_Link"]',  // Profile link in nav
+      'a[href*="/"][data-testid="AppTabBar_Profile_Link"]'
+    ];
+
+    for (const selector of accountSelectors) {
+      const el = page.locator(selector);
+      const count = await el.count().catch(() => 0);
+      if (count > 0) {
+        const text = await el.first().innerText().catch(() => '');
+        // Extract handle (starts with @)
+        const match = text.match(/@(\w+)/);
+        if (match) return match[1].toLowerCase();
+      }
+    }
+
+    // Try to get from profile link href
+    const profileLink = page.locator('[data-testid="AppTabBar_Profile_Link"]');
+    const href = await profileLink.getAttribute('href').catch(() => null);
+    if (href) {
+      const match = href.match(/^\/(\w+)$/);
+      if (match) return match[1].toLowerCase();
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 // Verify the logged-in account matches the expected handle
 async function verifyAccount(page, expectedHandle) {
   try {
@@ -441,6 +477,17 @@ async function verifyAccount(page, expectedHandle) {
     log("info", `Navigating to profile @${expectedHandle}...`);
     await page.goto(`https://x.com/${expectedHandle}`, { waitUntil: "domcontentloaded", timeout: 30000 });
     await page.waitForTimeout(3000); // Give page time to fully load
+
+    // FIRST: Check who is actually logged in via sidebar
+    const loggedInAs = await getLoggedInHandle(page);
+    if (loggedInAs) {
+      if (loggedInAs === expectedHandle.toLowerCase()) {
+        log("success", `Confirmed logged in as @${loggedInAs}`);
+      } else {
+        log("error", `WRONG ACCOUNT! Logged in as @${loggedInAs}, but expected @${expectedHandle}`);
+        return false;
+      }
+    }
 
     // Strategy 1: Look for "Edit profile" button (multiple possible selectors)
     const editSelectors = [
@@ -486,12 +533,18 @@ async function verifyAccount(page, expectedHandle) {
       return false;
     }
 
-    // Strategy 3: Check URL matches expected handle (case-insensitive)
+    // Strategy 3: If we confirmed logged-in handle matches, trust that
+    if (loggedInAs && loggedInAs === expectedHandle.toLowerCase()) {
+      return true;
+    }
+
+    // Strategy 4: Check URL matches expected handle (case-insensitive) - ONLY if edit button found
     const currentUrl = page.url().toLowerCase();
     if (currentUrl.includes(`x.com/${expectedHandle.toLowerCase()}`)) {
-      // We're on the right profile page and no Follow button = likely our profile
-      log("info", `On correct profile URL, assuming it's ours`);
-      return true;
+      // Without Edit button AND without logged-in confirmation, this is NOT safe
+      log("warn", `On profile URL but could not confirm account ownership`);
+      log("warn", `Please ensure you are logged in as @${expectedHandle}`);
+      return false;  // Changed from true - don't assume!
     }
 
     log("warn", `Could not verify profile ownership - URL: ${page.url()}`);
