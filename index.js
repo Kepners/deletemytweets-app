@@ -428,6 +428,58 @@ async function pauseAllVideos(page) {
   } catch {}
 }
 
+// Dismiss common X/Twitter popups that can block interactions
+async function dismissPopups(page) {
+  try {
+    // Cookie consent - "Accept all cookies" or close button
+    const cookieSelectors = [
+      '[data-testid="BottomBar"] button:has-text("Accept")',
+      'button:has-text("Accept all cookies")',
+      'button:has-text("Accept cookies")',
+      '[aria-label="Close"]'
+    ];
+
+    // Premium/subscription prompts
+    const premiumSelectors = [
+      '[data-testid="sheetDialog"] [aria-label="Close"]',
+      '[role="dialog"] button[aria-label="Close"]',
+      'button:has-text("Not now")',
+      'button:has-text("Maybe later")'
+    ];
+
+    // Notification prompts
+    const notificationSelectors = [
+      'button:has-text("Not now")',
+      '[data-testid="app-bar-close"]'
+    ];
+
+    // General modal close buttons
+    const closeSelectors = [
+      '[data-testid="app-bar-close"]',
+      '[data-testid="xMigrationBottomBar"] button',
+      '[role="dialog"] [aria-label="Close"]',
+      'div[data-testid="confirmationSheetCancel"]'
+    ];
+
+    const allSelectors = [...cookieSelectors, ...premiumSelectors, ...notificationSelectors, ...closeSelectors];
+
+    for (const selector of allSelectors) {
+      try {
+        const el = page.locator(selector).first();
+        const count = await el.count().catch(() => 0);
+        if (count > 0 && await el.isVisible().catch(() => false)) {
+          await el.click({ timeout: 1000 }).catch(() => {});
+          await page.waitForTimeout(300);
+        }
+      } catch {}
+    }
+
+    // Also try pressing Escape to close any modal
+    await page.keyboard.press('Escape').catch(() => {});
+
+  } catch {}
+}
+
 // ================= AUTH =================
 async function isLoggedIn(context) {
   try { return (await context.cookies()).some(c => c.name.toLowerCase() === "auth_token"); }
@@ -758,6 +810,9 @@ async function gotoProfileTab(page, tab) {
       spinner.text = chalk.yellow('Retrying navigation...');
       await page.goto(url, { waitUntil: "networkidle", timeout: 60000 });
     }
+
+    // Dismiss any popups that appeared (cookie banners, premium prompts, etc)
+    await dismissPopups(page);
 
     spinner.succeed(chalk.green(`Loaded @${PROFILE_HANDLE}/${tab}`));
   } catch (err) {
@@ -1091,8 +1146,9 @@ async function processTab(page, tabName, removed, startTime) {
       const totalCards = await allCards(page).count();
       log("info", `Found ${work.length} deletable of ${totalCards} total cards (${seen.size} scanned)`);
 
-      // Pause any playing videos to prevent stalling
+      // Pause videos and dismiss popups to prevent blocking
       await pauseAllVideos(page);
+      await dismissPopups(page);
 
       if (work.length > 0) {
         noLoadCount = 0;
@@ -1160,8 +1216,9 @@ async function processTab(page, tabName, removed, startTime) {
       const afterCount = await allCards(page).count();
       console.log(`[SCROLL] ${beforeCount} → ${afterCount} cards loaded`);
 
-      // Pause any new videos that loaded
+      // Pause videos and dismiss any popups that appeared
       await pauseAllVideos(page);
+      await dismissPopups(page);
 
       // Check if we hit the bottom (no new tweets loading)
       if (afterCount <= beforeCount) {
