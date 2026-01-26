@@ -407,6 +407,14 @@ function rand(min, max) { return Math.floor(min + Math.random() * (max - min + 1
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 async function pause(minMs, maxMs) { await sleep(rand(minMs, maxMs)); }
 
+// Timeout wrapper to prevent hanging on video tweets
+async function withTimeout(promise, ms = 3000, fallback = null) {
+  return Promise.race([
+    promise,
+    new Promise(resolve => setTimeout(() => resolve(fallback), ms))
+  ]);
+}
+
 // ================= AUTH =================
 async function isLoggedIn(context) {
   try { return (await context.cookies()).some(c => c.name.toLowerCase() === "auth_token"); }
@@ -661,17 +669,19 @@ function allCards(page) {
 async function getTweetDate(card) {
   try {
     const timeEl = card.locator('[data-testid="User-Name"] time[datetime]').first();
-    if (await timeEl.count() === 0) {
+    const timeCount = await withTimeout(timeEl.count(), 2000, 0);
+    if (timeCount === 0) {
       const statusLink = card.locator('a[href*="/status/"] time[datetime]').first();
-      if (await statusLink.count() === 0) return null;
-      const datetime = await statusLink.getAttribute('datetime');
+      const statusCount = await withTimeout(statusLink.count(), 2000, 0);
+      if (statusCount === 0) return null;
+      const datetime = await withTimeout(statusLink.getAttribute('datetime'), 2000, null);
       if (!datetime) return null;
       const date = new Date(datetime);
       if (isNaN(date.getTime())) return null;
       return date;
     }
 
-    const datetime = await timeEl.getAttribute('datetime');
+    const datetime = await withTimeout(timeEl.getAttribute('datetime'), 2000, null);
     if (!datetime) return null;
     const date = new Date(datetime);
     if (isNaN(date.getTime())) return null;
@@ -691,9 +701,12 @@ async function shouldDeleteByDate(card) {
 
   let preview = "";
   try {
-    const tweetText = await card.locator('[data-testid="tweetText"]').first().innerText().catch(() => "");
-    preview = tweetText.substring(0, 40).replace(/\n/g, " ");
-    if (tweetText.length > 40) preview += "...";
+    const tweetText = await withTimeout(
+      card.locator('[data-testid="tweetText"]').first().innerText().catch(() => ""),
+      2000, ""
+    );
+    preview = (tweetText || "").substring(0, 40).replace(/\n/g, " ");
+    if ((tweetText || "").length > 40) preview += "...";
   } catch {}
 
   if (tweetDate === null) {
@@ -721,9 +734,41 @@ async function shouldDeleteByDate(card) {
 }
 
 // ================= TWEET OPERATIONS =================
+
+// Check if this card shows a repost by the current user
+async function isUserRepost(card) {
+  try {
+    // Look for "Reposted" or "retweeted" indicator with user's link
+    const socialContext = card.locator('[data-testid="socialContext"]');
+    const contextCount = await withTimeout(socialContext.count(), 1000, 0);
+    if (contextCount > 0) {
+      const contextText = await withTimeout(socialContext.first().innerText().catch(() => ""), 1000, "");
+      // Check if it says "You reposted" or has the user's handle
+      if (contextText && (contextText.toLowerCase().includes('repost') || contextText.toLowerCase().includes('retweet'))) {
+        return true;
+      }
+    }
+    // Also check for the repost icon being highlighted (green)
+    const repostBtn = card.locator('[data-testid="unretweet"]');
+    const repostCount = await withTimeout(repostBtn.count(), 1000, 0);
+    return repostCount > 0;
+  } catch {
+    return false;
+  }
+}
+
 async function isYours(page, card) {
-  if (await card.locator(`a[href="/${PROFILE_HANDLE}"]`).count()) return true;
-  if (await card.locator(`[data-testid="User-Name"] a[href="/${PROFILE_HANDLE}"]`).count()) return true;
+  // Check if tweet author is the user
+  const authorLink = await withTimeout(card.locator(`a[href="/${PROFILE_HANDLE}"]`).count(), 1500, 0);
+  if (authorLink > 0) return true;
+
+  const userNameLink = await withTimeout(card.locator(`[data-testid="User-Name"] a[href="/${PROFILE_HANDLE}"]`).count(), 1500, 0);
+  if (userNameLink > 0) return true;
+
+  // Check if this is a repost by the user (for undoing reposts)
+  if (HANDLE_REPOSTS && await isUserRepost(card)) return true;
+
+  // Last resort: check if menu has Delete option
   if (await menuHasDelete(page, card)) return true;
   return false;
 }
@@ -750,7 +795,10 @@ async function scrollToTop(page) {
 }
 
 async function statusKey(card) {
-  const h = await card.locator('a[href*="/status/"]').first().getAttribute("href").catch(() => null);
+  const h = await withTimeout(
+    card.locator('a[href*="/status/"]').first().getAttribute("href").catch(() => null),
+    2000, null
+  );
   if (!h) return null;
   try { return new URL(h, "https://x.com").pathname; } catch { return h; }
 }
@@ -771,10 +819,10 @@ async function openMenu(page, card) {
 async function menuHasDelete(page, card) {
   if (!(await openMenu(page, card))) return false;
   const items = page.locator('div[role="menuitem"], a[role="menuitem"], button[role="menuitem"]');
-  const n = await items.count();
+  const n = await withTimeout(items.count(), 2000, 0);
   let has = false;
-  for (let i = 0; i < n; i++) {
-    const t = ((await items.nth(i).innerText().catch(() => "")) || "").trim();
+  for (let i = 0; i < n && i < 10; i++) { // Limit loop iterations
+    const t = ((await withTimeout(items.nth(i).innerText().catch(() => ""), 1000, "")) || "").trim();
     if (RE_DELETE.test(t)) { has = true; break; }
   }
   await page.keyboard.press("Escape").catch(() => {});
@@ -783,10 +831,13 @@ async function menuHasDelete(page, card) {
 
 async function clickMenuItem(page, regex) {
   const items = page.locator('div[role="menuitem"], a[role="menuitem"], button[role="menuitem"]');
-  const n = await items.count();
-  for (let i = 0; i < n; i++) {
-    const t = ((await items.nth(i).innerText().catch(() => "")) || "").trim();
-    if (regex.test(t)) { await items.nth(i).click({ delay: 10, timeout: 5000 }).catch(() => {}); return true; }
+  const n = await withTimeout(items.count(), 2000, 0);
+  for (let i = 0; i < n && i < 10; i++) { // Limit iterations
+    const t = ((await withTimeout(items.nth(i).innerText().catch(() => ""), 1000, "")) || "").trim();
+    if (regex.test(t)) {
+      await items.nth(i).click({ delay: 10, timeout: 5000 }).catch(() => {});
+      return true;
+    }
   }
   return false;
 }
@@ -798,7 +849,8 @@ async function confirmDeleteIfNeeded(page) {
     'button:has-text("Delete")',
     'div[role="button"]:has-text("Delete")'
   ].join(", ")).first();
-  if (await btn.count()) await btn.click({ delay: 10, timeout: 5000 }).catch(() => {});
+  const count = await withTimeout(btn.count(), 2000, 0);
+  if (count > 0) await btn.click({ delay: 10, timeout: 5000 }).catch(() => {});
 }
 
 async function tryDelete(page, card) {
@@ -813,26 +865,37 @@ async function tryDelete(page, card) {
 async function tryUndoRepost(page, card) {
   if (!HANDLE_REPOSTS) return { ok: false, reason: "repost-disabled" };
 
-  // Find the repost button (green when active) - NOT the caret menu
-  const repostBtn = card.locator('[data-testid="unretweet"], [data-testid="retweet"]').first();
-  if (!(await repostBtn.count())) return { ok: false, reason: "no-repost-btn" };
+  // Find the repost/unretweet button - green when active
+  const unretweetBtn = card.locator('[data-testid="unretweet"]').first();
+  const retweetBtn = card.locator('[data-testid="retweet"]').first();
 
-  // Check if it's actually a repost (unretweet button present means it's reposted)
-  const isReposted = await card.locator('[data-testid="unretweet"]').count() > 0;
-  if (!isReposted) return { ok: false, reason: "not-a-repost" };
+  // Check for the unretweet button (indicates this is a repost)
+  const unretweetCount = await withTimeout(unretweetBtn.count(), 2000, 0);
 
-  // Click the repost button to open the undo menu
-  await repostBtn.click({ timeout: 5000 }).catch(() => {});
-  await page.waitForTimeout(200);
+  if (unretweetCount > 0) {
+    // Found unretweet button - click it to undo
+    log("info", "Found unretweet button, attempting undo...");
+    await unretweetBtn.click({ timeout: 5000 }).catch(() => {});
+    await page.waitForTimeout(300);
 
-  // Now click "Undo Repost" from the popup menu
-  const ok = await clickMenuItem(page, RE_UNDO_REPOST);
-  if (!ok) {
-    // Close any open menu
-    await page.keyboard.press("Escape").catch(() => {});
-    return { ok: false, reason: "no-undo-item" };
+    // Click "Undo Repost" from the popup menu
+    const ok = await clickMenuItem(page, RE_UNDO_REPOST);
+    if (!ok) {
+      await page.keyboard.press("Escape").catch(() => {});
+      return { ok: false, reason: "no-undo-item" };
+    }
+    return { ok: true, reason: "unreposted" };
   }
-  return { ok: true, reason: "unreposted" };
+
+  // Check if there's a regular retweet button (not reposted)
+  const retweetCount = await withTimeout(retweetBtn.count(), 2000, 0);
+  if (retweetCount > 0) {
+    // Has retweet button but NOT unretweet - this isn't our repost
+    return { ok: false, reason: "not-a-repost" };
+  }
+
+  // Neither button found - might be a different tweet type
+  return { ok: false, reason: "no-repost-btn" };
 }
 
 async function collectWorklist(page, want, seen) {
