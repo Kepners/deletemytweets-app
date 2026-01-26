@@ -868,11 +868,37 @@ async function confirmDeleteIfNeeded(page) {
 
 async function tryDelete(page, card) {
   if (!(await openMenu(page, card))) return { ok: false, reason: "no-menu" };
-  const ok = await clickMenuItem(page, RE_DELETE);
-  if (!ok) return { ok: false, reason: "no-delete-item" };
-  await page.waitForTimeout(150);
-  await confirmDeleteIfNeeded(page);
-  return { ok: true, reason: "deleted" };
+
+  // Try to find and click Delete
+  const items = page.locator('div[role="menuitem"], a[role="menuitem"], button[role="menuitem"]');
+  const n = await withTimeout(items.count(), 2000, 0);
+
+  if (n === 0) {
+    await page.keyboard.press("Escape").catch(() => {});
+    return { ok: false, reason: "menu-empty" };
+  }
+
+  // Look for Delete option
+  for (let i = 0; i < n && i < 10; i++) {
+    const t = ((await withTimeout(items.nth(i).innerText().catch(() => ""), 1000, "")) || "").trim();
+    if (RE_DELETE.test(t)) {
+      await items.nth(i).click({ delay: 10, timeout: 5000 }).catch(() => {});
+      await page.waitForTimeout(150);
+      await confirmDeleteIfNeeded(page);
+      return { ok: true, reason: "deleted" };
+    }
+  }
+
+  // Delete not found - log what WAS in the menu for debugging
+  const menuItems = [];
+  for (let i = 0; i < Math.min(n, 5); i++) {
+    const t = ((await withTimeout(items.nth(i).innerText().catch(() => ""), 500, "")) || "").trim();
+    if (t) menuItems.push(t.split('\n')[0]); // First line only
+  }
+  await page.keyboard.press("Escape").catch(() => {});
+  console.log(`[DEBUG] Menu had ${n} items: ${menuItems.join(', ')}`);
+
+  return { ok: false, reason: "no-delete-item" };
 }
 
 async function tryUndoRepost(page, card) {
@@ -991,12 +1017,21 @@ async function processTab(page, tabName, removed, startTime) {
             ]).catch(() => {});
             await page.waitForTimeout(100);
 
-            let res = await tryDelete(page, card);
-            if (!res.ok) res = await tryUndoRepost(page, card);
+            let deleteRes = await tryDelete(page, card);
+            let res = deleteRes;
 
-            // Log if tweet couldn't be deleted
+            if (!deleteRes.ok) {
+              // Try repost undo as fallback
+              res = await tryUndoRepost(page, card);
+            }
+
+            // Log if tweet couldn't be deleted - show both reasons
             if (!res.ok) {
-              log("info", `Skipped: ${res.reason}`);
+              if (deleteRes.reason !== res.reason) {
+                log("warn", `Skipped: delete failed (${deleteRes.reason}), repost failed (${res.reason})`);
+              } else {
+                log("info", `Skipped: ${res.reason}`);
+              }
             }
 
             if (res.ok) {
