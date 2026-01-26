@@ -974,11 +974,11 @@ async function statusKey(card) {
 }
 
 async function openMenu(page, card) {
+  // IMPORTANT: Only target the caret/more button, NOT repost/like/reply buttons
+  // The caret button has data-testid="caret" - be specific to avoid clicking repost button
   const more = card.locator([
     'button[data-testid="caret"]',
-    'button[aria-haspopup="menu"][role="button"]',
-    'div[data-testid="caret"]',
-    'div[aria-haspopup="menu"][role="button"]'
+    'div[data-testid="caret"]'
   ].join(", "));
   if (!(await more.count())) return false;
   await more.first().click({ delay: 10, timeout: 5000 }).catch(() => {});
@@ -1072,15 +1072,43 @@ async function tryUndoRepost(page, card) {
     // Found unretweet button - click it to undo
     log("info", "Found unretweet button, attempting undo...");
     await unretweetBtn.click({ timeout: 5000 }).catch(() => {});
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(500);  // Wait longer for popup to appear
 
-    // Click "Undo Repost" from the popup menu
-    const ok = await clickMenuItem(page, RE_UNDO_REPOST);
-    if (!ok) {
-      await page.keyboard.press("Escape").catch(() => {});
-      return { ok: false, reason: "no-undo-item" };
+    // Try multiple selectors for the repost popup menu items
+    // X's repost popup uses different selectors than the caret menu
+    const popupSelectors = [
+      'div[role="menuitem"]',
+      'a[role="menuitem"]',
+      'button[role="menuitem"]',
+      '[data-testid="unretweetConfirm"]',  // Direct undo repost button
+      'div[role="menu"] div[role="menuitem"]',
+      '[role="menu"] span'
+    ];
+
+    for (const selector of popupSelectors) {
+      const items = page.locator(selector);
+      const n = await withTimeout(items.count(), 1000, 0);
+      for (let i = 0; i < n && i < 5; i++) {
+        const t = ((await withTimeout(items.nth(i).innerText().catch(() => ""), 500, "")) || "").trim();
+        if (RE_UNDO_REPOST.test(t)) {
+          log("info", `Clicking "${t}" to undo repost...`);
+          await items.nth(i).click({ delay: 10, timeout: 5000 }).catch(() => {});
+          await page.waitForTimeout(300);
+          return { ok: true, reason: "unreposted" };
+        }
+      }
     }
-    return { ok: true, reason: "unreposted" };
+
+    // Also try clicking directly if there's an unretweetConfirm button
+    const confirmBtn = page.locator('[data-testid="unretweetConfirm"]').first();
+    const confirmCount = await withTimeout(confirmBtn.count(), 500, 0);
+    if (confirmCount > 0) {
+      await confirmBtn.click({ timeout: 3000 }).catch(() => {});
+      return { ok: true, reason: "unreposted" };
+    }
+
+    await page.keyboard.press("Escape").catch(() => {});
+    return { ok: false, reason: "no-undo-item" };
   }
 
   // Check if there's a regular retweet button (not reposted)
