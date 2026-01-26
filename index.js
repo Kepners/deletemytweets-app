@@ -415,7 +415,7 @@ async function withTimeout(promise, ms = 3000, fallback = null) {
   ]);
 }
 
-// Pause all videos on page to prevent resource drain and stalling
+// Kill all videos on page - pause, remove source, prevent loading
 async function pauseAllVideos(page) {
   try {
     await page.evaluate(() => {
@@ -423,7 +423,12 @@ async function pauseAllVideos(page) {
         v.pause();
         v.currentTime = 0;
         v.preload = 'none';
+        v.autoplay = false;
+        v.src = '';  // Remove source to stop network requests
+        v.load();    // Force reload with empty src
       });
+      // Also kill any pending video network requests
+      document.querySelectorAll('source').forEach(s => s.remove());
     });
   } catch {}
 }
@@ -803,12 +808,17 @@ async function gotoProfileTab(page, tab) {
 
   try {
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
+
+    // Kill videos IMMEDIATELY to prevent network stalling
+    await pauseAllVideos(page);
+
     await page.waitForSelector("main", { timeout: 30000 });
 
     const currentUrl = page.url();
     if (!currentUrl.includes(PROFILE_HANDLE)) {
       spinner.text = chalk.yellow('Retrying navigation...');
-      await page.goto(url, { waitUntil: "networkidle", timeout: 60000 });
+      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
+      await pauseAllVideos(page);
     }
 
     // Dismiss any popups that appeared (cookie banners, premium prompts, etc)
@@ -1160,11 +1170,17 @@ async function processTab(page, tabName, removed, startTime) {
           if (isAborted() || removed.count >= TARGET) break;
 
           try {
+            // Kill any videos BEFORE scrolling to prevent network stalling
+            await pauseAllVideos(page);
+
             // Timeout scroll to prevent hanging on video tweets
             await Promise.race([
               card.scrollIntoViewIfNeeded(),
               new Promise((_, reject) => setTimeout(() => reject(new Error('scroll timeout')), 3000))
             ]).catch(() => {});
+
+            // Kill videos again after scroll (new ones may have loaded)
+            await pauseAllVideos(page);
             await page.waitForTimeout(100);
 
             let deleteRes = await tryDelete(page, card);
