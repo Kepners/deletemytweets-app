@@ -4,6 +4,14 @@ const path = require('path');
 // Keep a global reference of the window object
 let mainWindow;
 let isCleanupRunning = false;
+const HANDLE_PATTERN = /^[A-Za-z0-9_]{1,15}$/;
+
+function normalizeHandle(rawHandle) {
+  if (typeof rawHandle !== 'string') return null;
+  const trimmed = rawHandle.trim().replace(/^@+/, '');
+  if (!HANDLE_PATTERN.test(trimmed)) return null;
+  return trimmed.toLowerCase();
+}
 
 function createWindow() {
   // Create the browser window
@@ -78,49 +86,10 @@ const { spawn } = require('child_process');
 let cleanupProcess = null;
 let cleanupStats = { deleted: 0, protected: 0, skipped: 0, scanned: 0 };
 
-ipcMain.on('start-cleanup', async (event, config) => {
-  if (isCleanupRunning) {
-    event.reply('cleanup-error', 'Cleanup already running');
-    return;
-  }
+function getCliPaths() {
+  let indexPath;
+  let workingDir;
 
-  // Validate license before allowing cleanup
-  const license = getLicenseData();
-  if (!license || !license.licenseKey || !validateLicenseFormat(license.licenseKey)) {
-    event.reply('cleanup-error', 'No valid license found. Please activate a license to use this feature.');
-    return;
-  }
-
-  isCleanupRunning = true;
-  cleanupStats = { deleted: 0, protected: 0, skipped: 0, scanned: 0 };
-  const targetCount = parseInt(config.target, 10);
-
-  mainWindow?.webContents.send('cleanup-log', { type: 'info', message: 'Starting cleanup (CLI mode)...' });
-  event.reply('cleanup-started');
-
-  // Build environment variables for the CLI
-  const env = {
-    ...process.env,
-    DMT_HANDLE: config.handle,
-    DMT_TARGET: config.target.toString(),
-    DMT_DELETE_MONTH: config.deleteMonth.toString(),
-    DMT_DELETE_YEAR: config.deleteYear.toString(),
-    DMT_PROTECT_MONTH: config.protectMonth.toString(),
-    DMT_PROTECT_YEAR: config.protectYear.toString(),
-    DMT_POSTS: config.posts ? 'true' : 'false',
-    DMT_REPLIES: config.replies ? 'true' : 'false',
-    DMT_REPOSTS: config.reposts ? 'true' : 'false',
-    DMT_SPEED: config.speed || 'normal',
-    DMT_HEADLESS: config.headless ? 'true' : 'false',
-    DMT_PRIVATE_MODE: config.privateMode ? 'true' : 'false',
-    ELECTRON_USER_DATA: app.getPath('userData'),
-    // Force colors in output
-    FORCE_COLOR: '1'
-  };
-
-  // Get correct path to index.js for both dev and packaged modes
-  // In packaged apps, index.js is unpacked to: resources/app.asar.unpacked/
-  let indexPath, workingDir;
   if (app.isPackaged) {
     indexPath = path.join(process.resourcesPath, 'app.asar.unpacked', 'index.js');
     workingDir = path.join(process.resourcesPath, 'app.asar.unpacked');
@@ -129,13 +98,69 @@ ipcMain.on('start-cleanup', async (event, config) => {
     workingDir = __dirname;
   }
 
-  mainWindow?.webContents.send('cleanup-log', { type: 'info', message: `CLI path: ${indexPath}` });
-
-  // Use Electron's executable as Node with ELECTRON_RUN_AS_NODE=1
-  // NODE_PATH points to node_modules inside the asar archive
   const nodeModulesPath = app.isPackaged
     ? path.join(process.resourcesPath, 'app.asar', 'node_modules')
     : path.join(__dirname, 'node_modules');
+
+  return { indexPath, workingDir, nodeModulesPath };
+}
+
+function buildCliEnv(config, normalizedHandle, options = {}) {
+  return {
+    ...process.env,
+    DMT_HANDLE: normalizedHandle,
+    DMT_TARGET: String(config.target),
+    DMT_DELETE_MONTH: String(config.deleteMonth),
+    DMT_DELETE_YEAR: String(config.deleteYear),
+    DMT_PROTECT_MONTH: String(config.protectMonth),
+    DMT_PROTECT_YEAR: String(config.protectYear),
+    DMT_POSTS: config.posts ? 'true' : 'false',
+    DMT_REPLIES: config.replies ? 'true' : 'false',
+    DMT_REPOSTS: config.reposts ? 'true' : 'false',
+    DMT_SPEED: config.speed || 'normal',
+    DMT_HEADLESS: config.headless ? 'true' : 'false',
+    DMT_PRIVATE_MODE: config.privateMode ? 'true' : 'false',
+    ...(options.emitEvents ? { DMT_EMIT_EVENTS: 'true' } : {}),
+    ...(options.includeUserData ? { ELECTRON_USER_DATA: app.getPath('userData') } : {})
+  };
+}
+
+ipcMain.on('start-cleanup', async (event, config) => {
+  if (isCleanupRunning) {
+    event.reply('cleanup-error', 'Cleanup already running');
+    return;
+  }
+
+  const normalizedHandle = normalizeHandle(config?.handle);
+  if (!normalizedHandle) {
+    event.reply('cleanup-error', 'Invalid X handle. Use 1-15 letters, numbers, or underscores.');
+    return;
+  }
+
+  // Validate license before allowing cleanup
+  const license = await ensureRuntimeLicense(event, 'cleanup-error');
+  if (!license) {
+    return;
+  }
+
+  isCleanupRunning = true;
+  cleanupStats = { deleted: 0, protected: 0, skipped: 0, scanned: 0 };
+  const targetCount = Number.isFinite(parseInt(config.target, 10)) ? parseInt(config.target, 10) : 0;
+
+  mainWindow?.webContents.send('cleanup-log', { type: 'info', message: 'Starting cleanup (CLI mode)...' });
+  event.reply('cleanup-started');
+
+  // Build environment variables for the CLI
+  const env = {
+    ...buildCliEnv(config, normalizedHandle, { emitEvents: true, includeUserData: true }),
+    // Force colors in output
+    FORCE_COLOR: '1'
+  };
+
+  // Get correct path to index.js for both dev and packaged modes
+  const { indexPath, workingDir, nodeModulesPath } = getCliPaths();
+
+  mainWindow?.webContents.send('cleanup-log', { type: 'info', message: `CLI path: ${indexPath}` });
 
   cleanupProcess = spawn(process.execPath, [indexPath], {
     env: {
@@ -148,47 +173,79 @@ ipcMain.on('start-cleanup', async (event, config) => {
   });
 
   // Parse output and send to UI
+  const sendCleanupProgress = () => {
+    mainWindow?.webContents.send('cleanup-progress', {
+      scanned: cleanupStats.deleted + cleanupStats.protected + cleanupStats.skipped,
+      target: targetCount,
+      deleted: cleanupStats.deleted,
+      protected: cleanupStats.protected,
+      skipped: cleanupStats.skipped
+    });
+  };
+
+  let outputBuffer = '';
   const parseAndSend = (data) => {
-    const lines = data.toString().split('\n').filter(l => l.trim());
+    outputBuffer += data.toString();
+    const lines = outputBuffer.split(/\r?\n/);
+    outputBuffer = lines.pop() ?? '';
+
     for (const line of lines) {
+      if (!line.trim()) continue;
+
       // Strip ANSI color codes for parsing
       const clean = line.replace(/\x1b\[[0-9;]*m/g, '');
 
+      // Structured event channel from CLI for accurate counters.
+      if (clean.startsWith('__DMT_EVENT__')) {
+        try {
+          const payload = JSON.parse(clean.slice('__DMT_EVENT__'.length));
+          if (payload.type === 'deleted') {
+            cleanupStats.deleted = Number.isFinite(payload.count)
+              ? payload.count
+              : cleanupStats.deleted + 1;
+            sendCleanupProgress();
+          }
+        } catch {}
+        continue;
+      }
       // Detect log type from content
-      // Only count actual deletion/protection events (lines with → DELETE or Protected prefix)
       let type = 'info';
-      if (clean.includes('→ DELETE') || clean.includes('✗ DELETED')) {
+      if (clean.includes('DELETE')) {
         type = 'delete';
-        cleanupStats.deleted++;
-      } else if (clean.includes('Protected "') || clean.includes('🛡 Protected')) {
+      } else if (clean.includes('Protected')) {
         type = 'protect';
         cleanupStats.protected++;
-      } else if (clean.includes('Outside range') || clean.includes('⊘ SKIPPED')) {
+      } else if (
+        clean.includes('Outside range') ||
+        clean.includes('SKIPPED') ||
+        clean.includes('Too old, kept') ||
+        clean.includes('Unknown date, skipping')
+      ) {
         type = 'skip';
         cleanupStats.skipped++;
       } else if (clean.includes('ERROR') || clean.includes('Error') || clean.includes('error')) {
         type = 'error';
-      } else if (clean.includes('✓') || clean.includes('SUCCESS') || clean.includes('Completed')) {
+      } else if (clean.includes('SUCCESS') || clean.includes('Completed')) {
         type = 'success';
       }
 
       mainWindow?.webContents.send('cleanup-log', { type, message: clean });
-
-      // Update progress
-      mainWindow?.webContents.send('cleanup-progress', {
-        scanned: cleanupStats.deleted + cleanupStats.protected + cleanupStats.skipped,
-        target: targetCount,
-        deleted: cleanupStats.deleted,
-        protected: cleanupStats.protected,
-        skipped: cleanupStats.skipped
-      });
+      sendCleanupProgress();
     }
+  };
+
+  const flushOutputBuffer = () => {
+    const trailing = outputBuffer.trim();
+    if (!trailing) return;
+    outputBuffer = '';
+    parseAndSend(`${trailing}\n`);
   };
 
   cleanupProcess.stdout.on('data', parseAndSend);
   cleanupProcess.stderr.on('data', parseAndSend);
 
   cleanupProcess.on('close', (code) => {
+    flushOutputBuffer();
     isCleanupRunning = false;
     cleanupProcess = null;
     mainWindow?.webContents.send('cleanup-log', {
@@ -219,46 +276,23 @@ ipcMain.on('stop-cleanup', () => {
 // This is more reliable than running inside Electron
 // ═══════════════════════════════════════════════════════════
 ipcMain.on('run-in-terminal', async (event, config) => {
-  // Validate license first
-  const license = getLicenseData();
-  if (!license || !license.licenseKey || !validateLicenseFormat(license.licenseKey)) {
-    event.reply('terminal-error', 'No valid license found. Please activate a license first.');
+  const normalizedHandle = normalizeHandle(config?.handle);
+  if (!normalizedHandle) {
+    event.reply('terminal-error', 'Invalid X handle. Use 1-15 letters, numbers, or underscores.');
     return;
   }
 
-  const { spawn } = require('child_process');
-
-  // Build environment variables for the CLI
-  const env = {
-    ...process.env,
-    DMT_HANDLE: config.handle,
-    DMT_TARGET: config.target.toString(),
-    DMT_DELETE_MONTH: config.deleteMonth.toString(),
-    DMT_DELETE_YEAR: config.deleteYear.toString(),
-    DMT_PROTECT_MONTH: config.protectMonth.toString(),
-    DMT_PROTECT_YEAR: config.protectYear.toString(),
-    DMT_POSTS: config.posts ? 'true' : 'false',
-    DMT_REPLIES: config.replies ? 'true' : 'false',
-    DMT_REPOSTS: config.reposts ? 'true' : 'false',
-    DMT_SPEED: config.speed || 'normal',
-    DMT_HEADLESS: config.headless ? 'true' : 'false',
-    DMT_PRIVATE_MODE: config.privateMode ? 'true' : 'false'
-  };
-
-  // Get correct path to index.js for both dev and packaged modes
-  let indexPath, workingDir;
-  if (app.isPackaged) {
-    indexPath = path.join(process.resourcesPath, 'app.asar.unpacked', 'index.js');
-    workingDir = path.join(process.resourcesPath, 'app.asar.unpacked');
-  } else {
-    indexPath = path.join(__dirname, 'index.js');
-    workingDir = __dirname;
+  // Validate license first
+  const license = await ensureRuntimeLicense(event, 'terminal-error');
+  if (!license) {
+    return;
   }
 
-  // NODE_PATH points to node_modules inside the asar archive
-  const nodeModulesPath = app.isPackaged
-    ? path.join(process.resourcesPath, 'app.asar', 'node_modules')
-    : path.join(__dirname, 'node_modules');
+  // Build environment variables for the CLI
+  const env = buildCliEnv(config, normalizedHandle);
+
+  // Get correct path to index.js and node_modules for both dev and packaged modes
+  const { indexPath, workingDir, nodeModulesPath } = getCliPaths();
 
   // Launch CMD with Electron as Node (ELECTRON_RUN_AS_NODE)
   // /K keeps window open after completion
@@ -289,6 +323,51 @@ const licensePath = path.join(app.getPath('userData'), 'license.json');
 
 // License validation API URL
 const LICENSE_API_URL = 'https://deletemytweets.app/api/validate-license';
+
+async function validateLicenseWithServer(licenseKey) {
+  const fetch = require('node-fetch');
+  const response = await fetch(LICENSE_API_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ licenseKey })
+  });
+
+  let result = {};
+  try {
+    result = await response.json();
+  } catch {}
+
+  if (!response.ok || !result.valid) {
+    return {
+      valid: false,
+      error: result.error || 'License is invalid or has been revoked.'
+    };
+  }
+
+  return { valid: true, result };
+}
+
+async function ensureRuntimeLicense(event, replyChannel) {
+  const license = getLicenseData();
+  if (!license || !license.licenseKey || !validateLicenseFormat(license.licenseKey)) {
+    event.reply(replyChannel, 'No valid license found. Please activate a valid license.');
+    return null;
+  }
+
+  try {
+    const validation = await validateLicenseWithServer(license.licenseKey);
+    if (!validation.valid) {
+      deleteLicenseData();
+      event.reply(replyChannel, validation.error);
+      return null;
+    }
+    return license;
+  } catch (err) {
+    console.error('Runtime license validation failed:', err);
+    event.reply(replyChannel, 'Unable to verify license. Check your internet connection and try again.');
+    return null;
+  }
+}
 
 // Validate license key format: DMT-XXXX-XXXX-XXXX-XXXX
 function validateLicenseFormat(key) {
@@ -360,19 +439,11 @@ ipcMain.on('activate-license', async (event, licenseKey) => {
 
   // Validate against server
   try {
-    const fetch = require('node-fetch');
-    const response = await fetch(LICENSE_API_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ licenseKey: cleanKey })
-    });
-
-    const result = await response.json();
-
-    if (!result.valid) {
+    const validation = await validateLicenseWithServer(cleanKey);
+    if (!validation.valid) {
       event.reply('license-result', {
         success: false,
-        error: result.error || 'Invalid license key. Please check and try again.'
+        error: validation.error || 'Invalid license key. Please check and try again.'
       });
       return;
     }
@@ -443,19 +514,25 @@ ipcMain.on('save-config', (event, config) => {
 
 // Helper to get session path for a handle (uses userData folder)
 function getSessionPath(handle) {
-  return path.join(app.getPath('userData'), `x_auth_${handle.toLowerCase()}.json`);
+  const normalizedHandle = normalizeHandle(handle);
+  if (!normalizedHandle) return null;
+  return path.join(app.getPath('userData'), `x_auth_${normalizedHandle}.json`);
 }
 
 // Logout of X - clears session file and Edge cookies (no browser needed!)
 ipcMain.on('logout-x', async (event, handle) => {
+  const normalizedHandle = normalizeHandle(handle);
+  if (!normalizedHandle) {
+    event.reply('logout-x-result', { success: false, message: 'Invalid handle' });
+    return;
+  }
+
   try {
     // 1. Clear our session file
-    if (handle) {
-      const sessionPath = getSessionPath(handle);
-      if (fs.existsSync(sessionPath)) {
-        fs.unlinkSync(sessionPath);
-        console.log(`Cleared session file for @${handle}`);
-      }
+    const sessionPath = getSessionPath(normalizedHandle);
+    if (sessionPath && fs.existsSync(sessionPath)) {
+      fs.unlinkSync(sessionPath);
+      console.log(`Cleared session file for @${normalizedHandle}`);
     }
 
     // 2. Clear X cookies directly from Edge's SQLite database (no browser needed!)
@@ -499,28 +576,30 @@ ipcMain.on('logout-x', async (event, handle) => {
 
 // Check if session exists for a handle
 ipcMain.on('check-session', (event, handle) => {
-  if (!handle) {
+  const normalizedHandle = normalizeHandle(handle);
+  if (!normalizedHandle) {
     event.reply('session-status', { hasSession: false });
     return;
   }
-  const sessionPath = getSessionPath(handle);
+  const sessionPath = getSessionPath(normalizedHandle);
   const hasSession = fs.existsSync(sessionPath);
   event.reply('session-status', { hasSession, isFirstTime: !hasSession });
 
   // Show helpful message for first-time users
   if (!hasSession) {
-    mainWindow?.webContents.send('first-time-login', { handle });
+    mainWindow?.webContents.send('first-time-login', { handle: normalizedHandle });
   }
 });
 
 // Remove account session data completely
 ipcMain.on('remove-account-session', (event, handle) => {
-  if (!handle) return;
-  const sessionPath = getSessionPath(handle);
+  const normalizedHandle = normalizeHandle(handle);
+  if (!normalizedHandle) return;
+  const sessionPath = getSessionPath(normalizedHandle);
   try {
     if (fs.existsSync(sessionPath)) {
       fs.unlinkSync(sessionPath);
-      console.log(`Removed session data for @${handle}`);
+      console.log(`Removed session data for @${normalizedHandle}`);
     }
   } catch (err) {
     console.error('Error removing session:', err);
@@ -529,6 +608,12 @@ ipcMain.on('remove-account-session', (event, handle) => {
 
 // Login to X - opens browser for manual login
 ipcMain.on('login-x', async (event, handle) => {
+  const normalizedHandle = normalizeHandle(handle);
+  if (!normalizedHandle) {
+    event.reply('login-x-result', { success: false, message: 'Invalid handle' });
+    return;
+  }
+
   const { chromium } = require('playwright');
 
   try {
@@ -587,14 +672,14 @@ ipcMain.on('login-x', async (event, handle) => {
 
     if (loggedIn) {
       // Save session to userData folder (consistent with getSessionPath)
-      const sessionPath = getSessionPath(handle);
+      const sessionPath = getSessionPath(normalizedHandle);
       await context.storageState({ path: sessionPath });
       console.log(`Session saved to: ${sessionPath}`);
 
       if (browser) await browser.close();
       else await context.close();
 
-      event.reply('login-x-result', { success: true, message: `Logged in as @${handle}!` });
+      event.reply('login-x-result', { success: true, message: `Logged in as @${normalizedHandle}!` });
     } else {
       if (browser) await browser.close();
       else await context.close();

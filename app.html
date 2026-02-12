@@ -1362,6 +1362,25 @@
     };
     let isRunning = false;
     let hasValidLicense = false;
+    const HANDLE_PATTERN = /^[A-Za-z0-9_]{1,15}$/;
+
+    function normalizeHandle(rawHandle) {
+      if (typeof rawHandle !== 'string') return null;
+      const trimmed = rawHandle.trim().replace(/^@+/, '');
+      if (!HANDLE_PATTERN.test(trimmed)) return null;
+      return trimmed.toLowerCase();
+    }
+
+    function setCurrentHandle(handle) {
+      const normalizedHandle = normalizeHandle(handle);
+      if (!normalizedHandle) return null;
+
+      config.handle = normalizedHandle;
+      document.getElementById('handleDisplay').textContent = '@' + normalizedHandle;
+      document.getElementById('avatar').textContent = normalizedHandle[0].toUpperCase();
+      document.getElementById('statusDot').classList.remove('ready');
+      return normalizedHandle;
+    }
 
     // ═══════════════════════════════════════════════════════
     // LICENSE KEY MANAGEMENT
@@ -1630,7 +1649,8 @@
       for (let i = 0; i < localStorage.length; i++) {
         const key = localStorage.key(i);
         if (key.startsWith('deletionStats_')) {
-          const handle = key.replace('deletionStats_', '');
+          const handle = normalizeHandle(key.replace('deletionStats_', ''));
+          if (!handle) continue;
           const stats = getAccountStats(handle);
           accounts.push({
             handle: handle,
@@ -1670,32 +1690,40 @@
     }
 
     function removeAccount(handle) {
+      const normalizedHandle = normalizeHandle(handle);
+      if (!normalizedHandle) {
+        showNotification('Invalid account handle', 'warn');
+        return;
+      }
+
       // Don't allow removing current account while it's active
-      if (config.handle && handle.toLowerCase() === config.handle.toLowerCase()) {
+      if (config.handle && normalizedHandle === config.handle.toLowerCase()) {
         showNotification('Switch to another account first before removing this one', 'warn');
         return;
       }
 
       // Remove from localStorage
-      const key = getStatsKey(handle);
+      const key = getStatsKey(normalizedHandle);
       localStorage.removeItem(key);
 
       // Also tell backend to remove session data
-      api.removeAccountSession( handle);
+      api.removeAccountSession( normalizedHandle);
 
       updateAllAccountsList();
-      showNotification(`Removed @${handle}`, 'success');
+      showNotification(`Removed @${normalizedHandle}`, 'success');
     }
 
     function switchAccount(handle) {
-      config.handle = handle;
-      document.getElementById('handleDisplay').textContent = '@' + handle;
-      document.getElementById('avatar').textContent = handle[0].toUpperCase();
-      document.getElementById('statusDot').classList.remove('ready'); // Reset until we verify login
+      const normalizedHandle = setCurrentHandle(handle);
+      if (!normalizedHandle) {
+        showNotification('Invalid account handle', 'warn');
+        return;
+      }
+
       updateHistoryDisplay();
       updateAllAccountsList();
       updateLoginButtonForAccount();
-      api.saveConfig( { handle: handle });  // Persist selection
+      api.saveConfig( { handle: normalizedHandle });  // Persist selection
     }
 
     let lastDeletedCount = 0;
@@ -1962,9 +1990,11 @@
     });
 
     document.getElementById('modeProtect').addEventListener('click', () => {
-      sliderMode = 'protect';
-      document.getElementById('modeProtect').classList.add('active', 'protect');
-      document.getElementById('modeDelete').classList.remove('active');
+      // Protect mode is not implemented in cleanup engine yet.
+      sliderMode = 'delete';
+      document.getElementById('modeDelete').classList.add('active');
+      document.getElementById('modeProtect').classList.remove('active', 'protect');
+      showNotification('Protect mode is not available yet. Using Delete mode.', 'warn');
       updateSliderUI();
     });
 
@@ -2039,16 +2069,16 @@
       document.getElementById('modal').classList.remove('show');
     }
     function saveHandle() {
-      let h = document.getElementById('handleInput').value.trim().replace(/^@/,'');
+      const input = document.getElementById('handleInput').value;
+      const h = setCurrentHandle(input);
       if (h) {
-        config.handle = h;
-        document.getElementById('handleDisplay').textContent = '@' + h;
-        document.getElementById('avatar').textContent = h[0].toUpperCase();
-        document.getElementById('statusDot').classList.remove('ready');  // Don't show ready until login verified
         updateHistoryDisplay();  // Update stats for new account
         updateAllAccountsList();  // Update accounts list
         api.saveConfig( { handle: h });  // Persist handle
         api.checkSession( h);  // Check if we have a saved session - this will update statusDot
+      } else if (input.trim()) {
+        showNotification('Invalid handle. Use 1-15 letters, numbers, or underscores.', 'warn');
+        return;
       }
       hideModal();
     }
@@ -2184,9 +2214,13 @@
         box-shadow: 0 0 40px ${colors[type] || colors.info}40;
         animation: fadeIn 0.2s ease;
       `;
-      notif.innerHTML = `
-        <div style="font-size: 14px; color: var(--white); margin-bottom: 16px;">${message}</div>
-        <button onclick="this.parentElement.remove()" style="
+
+      const msgEl = document.createElement('div');
+      msgEl.style.cssText = 'font-size: 14px; color: var(--white); margin-bottom: 16px;';
+      msgEl.textContent = String(message ?? '');
+
+      const okBtn = document.createElement('button');
+      okBtn.style.cssText = `
           padding: 10px 30px;
           background: linear-gradient(135deg, var(--magenta), var(--purple));
           border: none;
@@ -2194,8 +2228,12 @@
           color: white;
           font-weight: 600;
           cursor: pointer;
-        ">OK</button>
-      `;
+        `;
+      okBtn.textContent = 'OK';
+      okBtn.addEventListener('click', () => notif.remove());
+
+      notif.appendChild(msgEl);
+      notif.appendChild(okBtn);
       document.body.appendChild(notif);
 
       // Auto-remove after 3 seconds
@@ -2234,6 +2272,13 @@
     // Start
     function startCleanup() {
       if (!config.handle) { showModal(); return; }
+      const normalizedHandle = normalizeHandle(config.handle);
+      if (!normalizedHandle) {
+        showNotification('Invalid handle. Use 1-15 letters, numbers, or underscores.', 'warn');
+        showModal();
+        return;
+      }
+      config.handle = normalizedHandle;
 
       // Check for valid license before starting cleanup
       if (!hasValidLicense) {
@@ -2370,12 +2415,11 @@
       if (c) {
         // Restore handle
         if (c.handle) {
-          config.handle = c.handle;
-          document.getElementById('handleDisplay').textContent = '@' + c.handle;
-          document.getElementById('avatar').textContent = c.handle[0].toUpperCase();
-          document.getElementById('statusDot').classList.remove('ready');
-          updateHistoryDisplay();
-          api.checkSession( c.handle);
+          const restoredHandle = setCurrentHandle(c.handle);
+          if (restoredHandle) {
+            updateHistoryDisplay();
+            api.checkSession(config.handle);
+          }
         }
 
         // Restore toggles
@@ -2462,12 +2506,11 @@
           sliderEnd = { year: c.protectYear, month: c.protectMonth };
         }
         if (c.sliderMode) {
-          sliderMode = c.sliderMode;
-          if (sliderMode === 'protect') {
-            document.getElementById('modeProtect').classList.add('active', 'protect');
-            document.getElementById('modeDelete').classList.remove('active');
-          }
+          sliderMode = c.sliderMode === 'protect' ? 'delete' : c.sliderMode;
         }
+        document.getElementById('modeDelete').classList.toggle('active', sliderMode === 'delete');
+        document.getElementById('modeProtect').classList.toggle('active', sliderMode === 'protect');
+        document.getElementById('modeProtect').classList.toggle('protect', sliderMode === 'protect');
         updateSliderUI();
       }
       updateAllAccountsList();
@@ -2487,10 +2530,10 @@
         if (key && key.startsWith('deletionStats_')) {
           // Found existing stats - if no handle set, use this one
           if (!config.handle) {
-            const handle = key.replace('deletionStats_', '');
-            config.handle = handle;
-            document.getElementById('handleDisplay').textContent = '@' + handle;
-            document.getElementById('avatar').textContent = handle[0].toUpperCase();
+            const handle = setCurrentHandle(key.replace('deletionStats_', ''));
+            if (handle) {
+              api.checkSession(config.handle);
+            }
           }
           break;
         }

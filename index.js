@@ -198,6 +198,13 @@ function log(type, message, extra = "") {
   console.log(`${timestamp} ${icon} ${message}${extraText}`);
 }
 
+function emitEvent(type, payload = {}) {
+  if (process.env.DMT_EMIT_EVENTS !== "true") return;
+  try {
+    console.log(`__DMT_EVENT__${JSON.stringify({ type, ...payload })}`);
+  } catch {}
+}
+
 function printSummary(removed, target, startTime) {
   if (!IS_CLI) return;
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
@@ -264,6 +271,14 @@ function stopProgress() {
 // ================= CONFIG FILE =================
 const CONFIG_FILE = path.resolve(__dirname, "deletemytweets_config.json");
 const SESSION_EXPIRY_MS = 90 * 24 * 60 * 60 * 1000; // 90 days (long sessions for all-day runs)
+const HANDLE_PATTERN = /^[A-Za-z0-9_]{1,15}$/;
+
+function normalizeHandle(rawHandle) {
+  if (typeof rawHandle !== "string") return null;
+  const trimmed = rawHandle.trim().replace(/^@+/, "");
+  if (!HANDLE_PATTERN.test(trimmed)) return null;
+  return trimmed.toLowerCase();
+}
 
 function loadConfig() {
   try {
@@ -283,6 +298,9 @@ function saveConfig(config) {
 // Get storage file path for specific handle
 // Use app's userData folder in Electron, or __dirname for CLI
 function getStoragePath(handle) {
+  const normalizedHandle = normalizeHandle(handle);
+  if (!normalizedHandle) return null;
+
   // Check if running in Electron
   let basePath = __dirname;
   try {
@@ -296,12 +314,13 @@ function getStoragePath(handle) {
       basePath = process.env.ELECTRON_USER_DATA;
     }
   }
-  return path.resolve(basePath, `x_auth_${handle.toLowerCase()}.json`);
+  return path.resolve(basePath, `x_auth_${normalizedHandle}.json`);
 }
 
 // Check if session is valid (exists and not expired)
 function isSessionValid(handle) {
   const storagePath = getStoragePath(handle);
+  if (!storagePath) return false;
   if (!fs.existsSync(storagePath)) return false;
 
   try {
@@ -321,6 +340,7 @@ function isSessionValid(handle) {
 // Clear session for a handle
 function clearSession(handle) {
   const storagePath = getStoragePath(handle);
+  if (!storagePath) return;
   try {
     if (fs.existsSync(storagePath)) {
       fs.unlinkSync(storagePath);
@@ -337,6 +357,46 @@ const SPEED_PRESETS = {
   normal:       { min: 1200, max: 2200 },  // Balanced (default)
   conservative: { min: 2500, max: 4000 }   // Slow but safe
 };
+
+const RETRY_PRESETS = {
+  aggressive:   { unknownDate: 2, ownership: 2, action: 2 },
+  normal:       { unknownDate: 3, ownership: 3, action: 3 },
+  conservative: { unknownDate: 5, ownership: 5, action: 4 }
+};
+
+let MAX_UNKNOWN_DATE_RETRIES = RETRY_PRESETS.normal.unknownDate;
+let MAX_OWNERSHIP_RETRIES = RETRY_PRESETS.normal.ownership;
+let MAX_ACTION_RETRIES = RETRY_PRESETS.normal.action;
+const RETRYABLE_ACTION_REASONS = new Set([
+  "no-menu",
+  "menu-empty",
+  "no-delete-item",
+  "no-unretweet-btn",
+  "no-undo-item"
+]);
+
+function parseRetryOverride(value) {
+  if (value === undefined || value === null || value === "") return null;
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 0) return null;
+  return n;
+}
+
+function applyRetryPreset(speed, overrides = {}) {
+  const preset = RETRY_PRESETS[speed] || RETRY_PRESETS.normal;
+  MAX_UNKNOWN_DATE_RETRIES = preset.unknownDate;
+  MAX_OWNERSHIP_RETRIES = preset.ownership;
+  MAX_ACTION_RETRIES = preset.action;
+
+  const unknownOverride = parseRetryOverride(overrides.unknownDate);
+  if (unknownOverride !== null) MAX_UNKNOWN_DATE_RETRIES = unknownOverride;
+
+  const ownershipOverride = parseRetryOverride(overrides.ownership);
+  if (ownershipOverride !== null) MAX_OWNERSHIP_RETRIES = ownershipOverride;
+
+  const actionOverride = parseRetryOverride(overrides.action);
+  if (actionOverride !== null) MAX_ACTION_RETRIES = actionOverride;
+}
 
 // Config variables (set by runCleanup or CLI)
 let PROFILE_HANDLE = null;
@@ -366,16 +426,18 @@ let PROTECT_AFTER = null;
 // Parse config from environment (CLI mode only)
 function parseEnvConfig() {
   // Support DMT_* env vars from Electron app, plus legacy names
-  PROFILE_HANDLE = process.env.DMT_HANDLE || process.env.PROFILE_HANDLE || process.argv[2] || savedConfig.handle;
+  const rawHandle = process.env.DMT_HANDLE || process.env.PROFILE_HANDLE || process.argv[2] || savedConfig.handle;
+  PROFILE_HANDLE = normalizeHandle(rawHandle);
 
   if (!PROFILE_HANDLE) {
     printHeader();
 
     const errorBox = boxen(
-      chalk.red.bold('ERROR: Profile handle is required!\n\n') +
+      chalk.red.bold('ERROR: Valid profile handle is required!\n\n') +
       chalk.white.bold('Usage:\n') +
       chalk.cyan('  node index.js ') + chalk.yellow('<your_handle>\n') +
       chalk.cyan('  PROFILE_HANDLE=') + chalk.yellow('handle') + chalk.cyan(' node index.js\n\n') +
+      chalk.white('Handle rules: 1-15 characters, letters/numbers/underscore only\n\n') +
       chalk.white.bold('Example:\n') +
       chalk.gray('  node index.js johndoe\n') +
       chalk.gray('  TARGET=100 DELETE_YEAR_AND_OLDER=2020 node index.js johndoe'),
@@ -409,6 +471,11 @@ function parseEnvConfig() {
   const delays = SPEED_PRESETS[SPEED] || SPEED_PRESETS.normal;
   MIN_DELAY_MS = parseInt(process.env.MIN_DELAY_MS ?? String(delays.min), 10);
   MAX_DELAY_MS = parseInt(process.env.MAX_DELAY_MS ?? String(delays.max), 10);
+  applyRetryPreset(SPEED, {
+    unknownDate: process.env.DMT_UNKNOWN_DATE_RETRIES ?? process.env.UNKNOWN_DATE_RETRIES,
+    ownership: process.env.DMT_OWNERSHIP_RETRIES ?? process.env.OWNERSHIP_RETRIES,
+    action: process.env.DMT_ACTION_RETRIES ?? process.env.ACTION_RETRIES
+  });
 
   LOGIN_WAIT_MS = parseInt(process.env.LOGIN_WAIT_MS ?? String(3 * 60 * 1000), 10);
   STORAGE = path.resolve(__dirname, "x_auth_storage.json");
@@ -436,6 +503,59 @@ const RE_UNDO_REPOST = /(Undo\s+(Repost|Retweet)|Unretweet|Deshacer\s+Repost|Ann
 function rand(min, max) { return Math.floor(min + Math.random() * (max - min + 1)); }
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 async function pause(minMs, maxMs) { await sleep(rand(minMs, maxMs)); }
+
+function getRetryEntry(retryState, key) {
+  let entry = retryState.get(key);
+  if (!entry) {
+    entry = { unknownDate: 0, ownership: 0, action: 0 };
+    retryState.set(key, entry);
+  }
+  return entry;
+}
+
+function finalizeSeenKey(seen, retryState, key) {
+  seen.add(key);
+  retryState.delete(key);
+}
+
+function registerActionFailure(seen, retryState, key, reason, options = {}) {
+  const { forceRetry = false, label = "action failure" } = options;
+  if (!key) return false;
+
+  const retryable = forceRetry || RETRYABLE_ACTION_REASONS.has(reason);
+  if (!retryable) {
+    finalizeSeenKey(seen, retryState, key);
+    return false;
+  }
+
+  const retryEntry = getRetryEntry(retryState, key);
+  if (retryEntry.action < MAX_ACTION_RETRIES) {
+    retryEntry.action++;
+    seen.delete(key);
+    log("info", `Retrying ${label} (${reason}) (${retryEntry.action}/${MAX_ACTION_RETRIES})`);
+    return true;
+  }
+
+  finalizeSeenKey(seen, retryState, key);
+  return false;
+}
+
+async function pauseLikeHuman(page, removedCount, rhythmState) {
+  await pause(MIN_DELAY_MS, MAX_DELAY_MS);
+
+  if (removedCount > 0 && removedCount >= rhythmState.nextLongPauseAt) {
+    const longPauseMs = rand(4500, 11000);
+    log("info", `Natural pause (${(longPauseMs / 1000).toFixed(1)}s)`);
+    await page.waitForTimeout(longPauseMs);
+    rhythmState.nextLongPauseAt = removedCount + rand(28, 60);
+    return;
+  }
+
+  // Occasional hesitation to avoid perfectly periodic timing.
+  if (Math.random() < 0.14) {
+    await page.waitForTimeout(rand(450, 1400));
+  }
+}
 
 // Timeout wrapper to prevent hanging on video tweets
 async function withTimeout(promise, ms = 3000, fallback = null) {
@@ -866,26 +986,39 @@ function allCards(page) {
 }
 
 // ================= DATE EXTRACTION =================
+async function dateFromLocator(locator, timeoutMs) {
+  const count = await withTimeout(locator.count(), timeoutMs, 0);
+  if (count === 0) return null;
+
+  const datetime = await withTimeout(locator.getAttribute('datetime'), timeoutMs, null);
+  if (!datetime) return null;
+
+  const date = new Date(datetime);
+  return isNaN(date.getTime()) ? null : date;
+}
+
+async function readTweetDate(card, timeoutMs) {
+  const selectors = [
+    '[data-testid="User-Name"] time[datetime]',
+    'a[href*="/status/"] time[datetime]',
+    'time[datetime]'
+  ];
+
+  for (const selector of selectors) {
+    const date = await dateFromLocator(card.locator(selector).first(), timeoutMs);
+    if (date) return date;
+  }
+  return null;
+}
+
 async function getTweetDate(card) {
   try {
-    const timeEl = card.locator('[data-testid="User-Name"] time[datetime]').first();
-    const timeCount = await withTimeout(timeEl.count(), 2000, 0);
-    if (timeCount === 0) {
-      const statusLink = card.locator('a[href*="/status/"] time[datetime]').first();
-      const statusCount = await withTimeout(statusLink.count(), 2000, 0);
-      if (statusCount === 0) return null;
-      const datetime = await withTimeout(statusLink.getAttribute('datetime'), 2000, null);
-      if (!datetime) return null;
-      const date = new Date(datetime);
-      if (isNaN(date.getTime())) return null;
-      return date;
-    }
+    const firstPass = await readTweetDate(card, 2800);
+    if (firstPass) return firstPass;
 
-    const datetime = await withTimeout(timeEl.getAttribute('datetime'), 2000, null);
-    if (!datetime) return null;
-    const date = new Date(datetime);
-    if (isNaN(date.getTime())) return null;
-    return date;
+    // Retry once for partially rendered cards.
+    await sleep(180);
+    return readTweetDate(card, 3600);
   } catch {
     return null;
   }
@@ -896,41 +1029,41 @@ function formatDate(date) {
   return `${months[date.getMonth()]} ${date.getFullYear()}`;
 }
 
-async function shouldDeleteByDate(card) {
-  const tweetDate = await getTweetDate(card);
-
-  let preview = "";
+async function getTweetPreview(card) {
   try {
     const tweetText = await withTimeout(
       card.locator('[data-testid="tweetText"]').first().innerText().catch(() => ""),
       2000, ""
     );
-    preview = (tweetText || "").substring(0, 40).replace(/\n/g, " ");
+    let preview = (tweetText || "").substring(0, 40).replace(/\n/g, " ");
     if ((tweetText || "").length > 40) preview += "...";
-  } catch {}
+    return preview;
+  } catch {
+    return "";
+  }
+}
+
+async function shouldDeleteByDate(card) {
+  const [tweetDate, preview] = await Promise.all([
+    getTweetDate(card),
+    getTweetPreview(card)
+  ]);
 
   if (tweetDate === null) {
-    log("warn", `Unknown date, skipping`, `"${preview}"`);
-    return false;
+    return { decision: "unknown", dateStr: null, preview };
   }
 
   const dateStr = formatDate(tweetDate);
 
-  // Protect tweets on or after the protect date
   if (tweetDate >= PROTECT_AFTER) {
-    log("protect", chalk.green(`${dateStr} Protected`), chalk.gray(`"${preview}"`));
-    return false;
+    return { decision: "protect", dateStr, preview };
   }
 
-  // Delete tweets FROM the delete date onwards (up to protection date)
   if (tweetDate >= DELETE_BEFORE) {
-    log("delete", chalk.red(`${dateStr} → DELETE`), chalk.gray(`"${preview}"`));
-    return true;
+    return { decision: "delete", dateStr, preview };
   }
 
-  // Tweets older than delete date are skipped (kept)
-  log("skip", chalk.gray(`${dateStr} Too old, kept`), chalk.gray(`"${preview}"`));
-  return false;
+  return { decision: "too-old", dateStr, preview };
 }
 
 // ================= TWEET OPERATIONS =================
@@ -992,32 +1125,21 @@ async function isUserRepost(card) {
 async function isYours(page, card) {
   // Check if tweet author is the user
   const authorLink = await withTimeout(card.locator(`a[href="/${PROFILE_HANDLE}"]`).count(), 1500, 0);
-  if (authorLink > 0) return true;
+  if (authorLink > 0) return { yours: true, transient: false, reason: "author-link", isRetweet: false };
 
   const userNameLink = await withTimeout(card.locator(`[data-testid="User-Name"] a[href="/${PROFILE_HANDLE}"]`).count(), 1500, 0);
-  if (userNameLink > 0) return true;
+  if (userNameLink > 0) return { yours: true, transient: false, reason: "username-link", isRetweet: false };
 
   // Check if this is a repost by the user (for undoing reposts)
-  if (HANDLE_REPOSTS && await isUserRepost(card)) return true;
+  if (HANDLE_REPOSTS && await isUserRepost(card)) {
+    return { yours: true, transient: false, reason: "user-repost", isRetweet: true };
+  }
 
   // Last resort: check if menu has Delete option
-  if (await menuHasDelete(page, card)) return true;
-  return false;
-}
-
-// Scroll down to load more tweets
-async function scrollToLoadTweets(page, passes = 5) {
-  // Faster scrolling for deep passes, slower for shallow (to let content load)
-  const delay = passes > 50 ? 300 : passes > 20 ? 400 : 500;
-
-  for (let i = 0; i < passes; i++) {
-    if (i % 50 === 0 && i > 0) {
-      // Brief pause every 50 scrolls to let Twitter catch up
-      await page.waitForTimeout(1000);
-    }
-    await page.evaluate(() => window.scrollBy(0, window.innerHeight));
-    await page.waitForTimeout(delay);
-  }
+  const menuCheck = await menuHasDelete(page, card);
+  if (menuCheck.hasDelete) return { yours: true, transient: false, reason: "menu-delete", isRetweet: false };
+  if (menuCheck.transient) return { yours: false, transient: true, reason: menuCheck.reason, isRetweet: false };
+  return { yours: false, transient: false, reason: "not-yours", isRetweet: false };
 }
 
 // Scroll to top of page
@@ -1044,34 +1166,28 @@ async function openMenu(page, card) {
   ].join(", "));
   if (!(await more.count())) return false;
   await more.first().click({ delay: 10, timeout: 5000 }).catch(() => {});
-  await page.waitForTimeout(150);
+  await page.waitForTimeout(220);
   return true;
 }
 
 async function menuHasDelete(page, card) {
-  if (!(await openMenu(page, card))) return false;
+  if (!(await openMenu(page, card))) {
+    return { hasDelete: false, transient: true, reason: "no-menu" };
+  }
   const items = page.locator('div[role="menuitem"], a[role="menuitem"], button[role="menuitem"]');
-  const n = await withTimeout(items.count(), 2000, 0);
+  const n = await withTimeout(items.count(), 3000, 0);
+  if (n === 0) {
+    await page.keyboard.press("Escape").catch(() => {});
+    return { hasDelete: false, transient: true, reason: "menu-empty" };
+  }
   let has = false;
   for (let i = 0; i < n && i < 10; i++) { // Limit loop iterations
     const t = ((await withTimeout(items.nth(i).innerText().catch(() => ""), 1000, "")) || "").trim();
     if (RE_DELETE.test(t)) { has = true; break; }
   }
   await page.keyboard.press("Escape").catch(() => {});
-  return has;
-}
-
-async function clickMenuItem(page, regex) {
-  const items = page.locator('div[role="menuitem"], a[role="menuitem"], button[role="menuitem"]');
-  const n = await withTimeout(items.count(), 2000, 0);
-  for (let i = 0; i < n && i < 10; i++) { // Limit iterations
-    const t = ((await withTimeout(items.nth(i).innerText().catch(() => ""), 1000, "")) || "").trim();
-    if (regex.test(t)) {
-      await items.nth(i).click({ delay: 10, timeout: 5000 }).catch(() => {});
-      return true;
-    }
-  }
-  return false;
+  if (has) return { hasDelete: true, transient: false, reason: "delete-item-found" };
+  return { hasDelete: false, transient: false, reason: "no-delete-item" };
 }
 
 async function confirmDeleteIfNeeded(page) {
@@ -1197,7 +1313,7 @@ async function tryUndoRepost(page, card) {
   return { ok: false, reason: "no-repost-btn" };
 }
 
-async function collectWorklist(page, want, seen) {
+async function collectWorklist(page, want, seen, retryState, seenEver) {
   const cards = allCards(page);
   const n = await cards.count();
   const mine = [];
@@ -1205,20 +1321,55 @@ async function collectWorklist(page, want, seen) {
     const card = cards.nth(i);
     const key = await statusKey(card);
     if (!key || seen.has(key)) continue;
-    seen.add(key);
+    seenEver.add(key);
+    const retryEntry = getRetryEntry(retryState, key);
 
-    // Check date FIRST to avoid opening menus on protected tweets
-    if (!(await shouldDeleteByDate(card))) {
-      continue; // Skip - either protected, too new, or unknown date
+    // Check date first to avoid menu interactions on protected/old tweets.
+    const dateCheck = await shouldDeleteByDate(card);
+    if (dateCheck.decision === "unknown") {
+      if (retryEntry.unknownDate < MAX_UNKNOWN_DATE_RETRIES) {
+        retryEntry.unknownDate++;
+        log("info", `Date not ready, retrying (${retryEntry.unknownDate}/${MAX_UNKNOWN_DATE_RETRIES})`, `"${dateCheck.preview}"`);
+        continue;
+      }
+      log("warn", `Unknown date, skipping`, `"${dateCheck.preview}"`);
+      finalizeSeenKey(seen, retryState, key);
+      continue;
     }
 
-    // Only check ownership (which may open menu) for tweets we want to delete
-    if (await isYours(page, card)) {
-      // Detect retweet status NOW while card is fresh - store it with the card
-      // This prevents issues with stale locators later in the deletion loop
-      const isRetweet = await isUserRepost(card);
-      mine.push({ card, isRetweet });
+    retryEntry.unknownDate = 0;
+    if (dateCheck.decision === "protect") {
+      log("protect", chalk.green(`${dateCheck.dateStr} Protected`), chalk.gray(`"${dateCheck.preview}"`));
+      finalizeSeenKey(seen, retryState, key);
+      continue;
     }
+    if (dateCheck.decision === "too-old") {
+      log("skip", chalk.gray(`${dateCheck.dateStr} Too old, kept`), chalk.gray(`"${dateCheck.preview}"`));
+      finalizeSeenKey(seen, retryState, key);
+      continue;
+    }
+
+    log("delete", chalk.red(`${dateCheck.dateStr} → DELETE`), chalk.gray(`"${dateCheck.preview}"`));
+
+    const ownership = await isYours(page, card);
+    if (!ownership.yours) {
+      if (ownership.transient && retryEntry.ownership < MAX_OWNERSHIP_RETRIES) {
+        retryEntry.ownership++;
+        log("info", `Ownership check pending (${ownership.reason}), retrying (${retryEntry.ownership}/${MAX_OWNERSHIP_RETRIES})`);
+        continue;
+      }
+      if (ownership.transient) {
+        log("info", `Ownership unresolved after retries (${ownership.reason}), skipping`);
+      }
+      finalizeSeenKey(seen, retryState, key);
+      continue;
+    }
+
+    retryEntry.ownership = 0;
+    // Preserve repost signal from ownership check; only re-check if still unknown.
+    const isRetweet = ownership.isRetweet || (HANDLE_REPOSTS && await isUserRepost(card));
+    seen.add(key); // Mark as in-flight; will be unmarked on retryable action failures.
+    mine.push({ key, card, isRetweet });
   }
   return mine;
 }
@@ -1235,6 +1386,9 @@ async function processTab(page, tabName, removed, startTime) {
   let sweepCount = 0;
   const MAX_SWEEPS = 50;  // Max full sweeps before giving up
   const globalSeen = new Set();  // Track ALL tweets seen across entire session
+  const seenEver = new Set();  // Monotonic scan count for loop detection/logging
+  const retryState = new Map();  // Retry budgets for transient detection/action failures
+  const rhythmState = { nextLongPauseAt: removed.count + rand(28, 60) };
   let loopDetectCount = 0;  // Count consecutive loops without progress
 
   // Outer loop: Full sweeps from top to bottom
@@ -1242,7 +1396,7 @@ async function processTab(page, tabName, removed, startTime) {
     sweepCount++;
     let deletedThisSweep = 0;
     let noLoadCount = 0;
-    const seenBeforeSweep = globalSeen.size;  // Track for loop detection
+    const seenBeforeSweep = seenEver.size;  // Track monotonic scan growth
 
     // Go to top for each sweep
     log("info", `Starting sweep ${sweepCount}...`);
@@ -1258,11 +1412,11 @@ async function processTab(page, tabName, removed, startTime) {
       }
 
       // Find deletable tweets in current view
-      const work = await collectWorklist(page, Math.min(10, TARGET - removed.count), globalSeen);
+      const work = await collectWorklist(page, Math.min(10, TARGET - removed.count), globalSeen, retryState, seenEver);
 
       // Debug: show what we found
       const totalCards = await allCards(page).count();
-      log("info", `Found ${work.length} deletable of ${totalCards} total cards (${globalSeen.size} scanned)`);
+      log("info", `Found ${work.length} deletable of ${totalCards} total cards (${seenEver.size} scanned)`);
 
       // Pause videos and dismiss popups to prevent blocking
       await pauseAllVideos(page);
@@ -1276,6 +1430,7 @@ async function processTab(page, tabName, removed, startTime) {
           if (isAborted() || removed.count >= TARGET) break;
 
           // Extract card and pre-computed isRetweet from worklist
+          const key = workItem.key;
           const card = workItem.card;
           const isRetweet = workItem.isRetweet;
 
@@ -1327,19 +1482,34 @@ async function processTab(page, tabName, removed, startTime) {
               } else {
                 log("info", `Skipped: ${repostRes.reason}`);
               }
+
+              const reasons = [res.reason, deleteRes.reason, repostRes.reason]
+                .filter(reason => reason && reason !== "not-tried");
+              const retryableReason = reasons.find(reason => RETRYABLE_ACTION_REASONS.has(reason));
+              if (retryableReason) {
+                registerActionFailure(globalSeen, retryState, key, retryableReason);
+              } else if (key) {
+                finalizeSeenKey(globalSeen, retryState, key);
+              }
             }
 
             if (res.ok) {
               removed.count++;
               deletedThisSweep++;
+              emitEvent("deleted", { count: removed.count });
               updateProgress(removed.count, tabName, TARGET);
               lastProgressTime = Date.now();
+              if (key) retryState.delete(key);
             }
           } catch (e) {
             log("error", "Delete failed (continuing)", e?.message || e);
+            registerActionFailure(globalSeen, retryState, key, "exception", {
+              forceRetry: true,
+              label: "after exception"
+            });
           }
 
-          await pause(MIN_DELAY_MS, MAX_DELAY_MS);
+          await pauseLikeHuman(page, removed.count, rhythmState);
         }
 
         // Rate limit protection
@@ -1376,8 +1546,8 @@ async function processTab(page, tabName, removed, startTime) {
       }
     }
 
-    const newTweetsSeen = globalSeen.size - seenBeforeSweep;
-    log("info", `Sweep ${sweepCount} complete: ${deletedThisSweep} deleted, ${newTweetsSeen} new tweets scanned (${globalSeen.size} total)`);
+    const newTweetsSeen = seenEver.size - seenBeforeSweep;
+    log("info", `Sweep ${sweepCount} complete: ${deletedThisSweep} deleted, ${newTweetsSeen} new tweets scanned (${seenEver.size} total)`);
 
     // Detect timeline looping - if no new tweets AND no deletions, timeline may have reset
     if (newTweetsSeen === 0 && deletedThisSweep === 0) {
@@ -1549,6 +1719,11 @@ async function run() {
   // Process Replies FIRST - old tweets are usually on /with_replies page
   if (INCLUDE_REPLIES) tabs.push("Replies");
   if (INCLUDE_POSTS) tabs.push("Posts");
+  if (tabs.length === 0 && HANDLE_REPOSTS) {
+    // Reposts live on the profile timeline; use Posts tab when repost-only mode is selected.
+    tabs.push("Posts");
+    log("info", "Reposts-only mode: scanning profile timeline for reposts");
+  }
 
   if (tabs.length === 0) {
     log("warn", chalk.yellow("Nothing to do - both Posts and Replies are disabled"));
@@ -1620,7 +1795,10 @@ async function runCleanup(config, callbacks = {}) {
   onLogCallback = callbacks.onLog || null;
 
   // Set config variables from passed config
-  PROFILE_HANDLE = config.handle;
+  PROFILE_HANDLE = normalizeHandle(config.handle);
+  if (!PROFILE_HANDLE) {
+    throw new Error('Invalid X handle. Use 1-15 letters, numbers, or underscores.');
+  }
   TARGET = config.target || 10000;
   DELETE_MONTH = config.deleteMonth || 12;
   DELETE_YEAR = config.deleteYear || 2014;
@@ -1637,6 +1815,11 @@ async function runCleanup(config, callbacks = {}) {
   const delays = SPEED_PRESETS[SPEED] || SPEED_PRESETS.normal;
   MIN_DELAY_MS = delays.min;
   MAX_DELAY_MS = delays.max;
+  applyRetryPreset(SPEED, {
+    unknownDate: config.unknownDateRetries,
+    ownership: config.ownershipRetries,
+    action: config.actionRetries
+  });
 
   // Set date boundaries
   DELETE_BEFORE = new Date(DELETE_YEAR, DELETE_MONTH - 1, 1);
