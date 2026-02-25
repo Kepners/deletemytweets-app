@@ -86,7 +86,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('cleanup-error', (event, data) => callback(data));
   },
   onCleanupComplete: (callback) => {
-    ipcRenderer.on('cleanup-complete', () => callback());
+    ipcRenderer.on('cleanup-complete', (event, data) => callback(data));
   },
 
   // ═══════════════════════════════════════════════════════════

@@ -4,6 +4,7 @@ const path = require('path');
 // Keep a global reference of the window object
 let mainWindow;
 let isCleanupRunning = false;
+let stopRequested = false;
 const HANDLE_PATTERN = /^[A-Za-z0-9_]{1,15}$/;
 
 function normalizeHandle(rawHandle) {
@@ -144,6 +145,7 @@ ipcMain.on('start-cleanup', async (event, config) => {
   }
 
   isCleanupRunning = true;
+  stopRequested = false;
   cleanupStats = { deleted: 0, protected: 0, skipped: 0, scanned: 0 };
   const targetCount = Number.isFinite(parseInt(config.target, 10)) ? parseInt(config.target, 10) : 0;
 
@@ -248,23 +250,48 @@ ipcMain.on('start-cleanup', async (event, config) => {
     flushOutputBuffer();
     isCleanupRunning = false;
     cleanupProcess = null;
+    const stopped = stopRequested;
+    const success = code === 0 && !stopped;
     mainWindow?.webContents.send('cleanup-log', {
-      type: code === 0 ? 'success' : 'info',
-      message: `Process exited (code ${code})`
+      type: stopped ? 'info' : success ? 'success' : 'error',
+      message: stopped ? 'Cleanup stopped by user' : `Process exited (code ${code})`
     });
-    mainWindow?.webContents.send('cleanup-complete');
+    if (!stopped && !success) {
+      mainWindow?.webContents.send('cleanup-error', `Cleanup failed (process exit code ${code}).`);
+    }
+    mainWindow?.webContents.send('cleanup-complete', {
+      success,
+      stopped,
+      code,
+      deleted: cleanupStats.deleted,
+      protected: cleanupStats.protected,
+      skipped: cleanupStats.skipped,
+      scanned: cleanupStats.deleted + cleanupStats.protected + cleanupStats.skipped,
+      target: targetCount
+    });
   });
 
   cleanupProcess.on('error', (err) => {
     isCleanupRunning = false;
     cleanupProcess = null;
     mainWindow?.webContents.send('cleanup-log', { type: 'error', message: err.message });
-    mainWindow?.webContents.send('cleanup-complete');
+    mainWindow?.webContents.send('cleanup-error', err.message);
+    mainWindow?.webContents.send('cleanup-complete', {
+      success: false,
+      stopped: false,
+      code: null,
+      deleted: cleanupStats.deleted,
+      protected: cleanupStats.protected,
+      skipped: cleanupStats.skipped,
+      scanned: cleanupStats.deleted + cleanupStats.protected + cleanupStats.skipped,
+      target: targetCount
+    });
   });
 });
 
 ipcMain.on('stop-cleanup', () => {
   if (cleanupProcess) {
+    stopRequested = true;
     cleanupProcess.kill('SIGTERM');
     mainWindow?.webContents.send('cleanup-log', { type: 'info', message: 'Stopping cleanup...' });
   }

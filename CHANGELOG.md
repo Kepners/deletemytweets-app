@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.3.37] - 2026-02-25
+
+### Fixed
+- **Deletion success over-reporting** in the Playwright engine.
+  - Delete/unrepost actions no longer report success when click/confirm fails.
+  - Added post-action verification before counting a tweet as removed.
+  - Added retry handling for transient action-confirmation failures.
+- **Progress and completion reporting** in the desktop app.
+  - Progress percent now reflects confirmed deletions vs target.
+  - Completion status now distinguishes `Complete`, `Finished`, `Stopped`, and `Failed`.
+  - Runtime process failures now surface through the cleanup error channel instead of appearing as successful completion.
+
 ## [1.1.0] - 2026-01-01
 
 ### Added

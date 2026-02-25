@@ -372,7 +372,14 @@ const RETRYABLE_ACTION_REASONS = new Set([
   "menu-empty",
   "no-delete-item",
   "no-unretweet-btn",
-  "no-undo-item"
+  "no-undo-item",
+  "menu-click-failed",
+  "delete-click-failed",
+  "confirm-click-failed",
+  "delete-not-confirmed",
+  "unretweet-click-failed",
+  "undo-click-failed",
+  "unrepost-not-confirmed"
 ]);
 
 function parseRetryOverride(value) {
@@ -1165,16 +1172,56 @@ async function openMenu(page, card) {
     'div[data-testid="caret"]'
   ].join(", "));
   if (!(await more.count())) return false;
-  await more.first().click({ delay: 10, timeout: 5000 }).catch(() => {});
+  try {
+    await more.first().click({ delay: 10, timeout: 5000 });
+  } catch {
+    return false;
+  }
   await page.waitForTimeout(220);
   return true;
+}
+
+function getMenuItemsLocator(page) {
+  return page.locator([
+    '[role="menu"]:visible div[role="menuitem"]',
+    '[role="menu"]:visible a[role="menuitem"]',
+    '[role="menu"]:visible button[role="menuitem"]'
+  ].join(", "));
+}
+
+function statusIdFromKey(key) {
+  if (typeof key !== "string") return null;
+  const m = key.match(/\/status\/(\d+)/);
+  return m ? m[1] : null;
+}
+
+async function waitForActionApplied(page, card, key, timeoutMs = 7000) {
+  const deadline = Date.now() + timeoutMs;
+  const statusId = statusIdFromKey(key);
+  const statusLocator = statusId
+    ? page.locator(`a[href*="/status/${statusId}"]`)
+    : null;
+
+  while (Date.now() < deadline) {
+    const currentKey = await statusKey(card);
+    if (!currentKey || currentKey !== key) return true;
+
+    if (statusLocator) {
+      const count = await withTimeout(statusLocator.count(), 1000, 0);
+      if (count === 0) return true;
+    }
+
+    await page.waitForTimeout(250);
+  }
+
+  return false;
 }
 
 async function menuHasDelete(page, card) {
   if (!(await openMenu(page, card))) {
     return { hasDelete: false, transient: true, reason: "no-menu" };
   }
-  const items = page.locator('div[role="menuitem"], a[role="menuitem"], button[role="menuitem"]');
+  const items = getMenuItemsLocator(page);
   const n = await withTimeout(items.count(), 3000, 0);
   if (n === 0) {
     await page.keyboard.press("Escape").catch(() => {});
@@ -1198,14 +1245,20 @@ async function confirmDeleteIfNeeded(page) {
     'div[role="button"]:has-text("Delete")'
   ].join(", ")).first();
   const count = await withTimeout(btn.count(), 2000, 0);
-  if (count > 0) await btn.click({ delay: 10, timeout: 5000 }).catch(() => {});
+  if (count === 0) return { ok: true, reason: "no-confirm-needed" };
+  try {
+    await btn.click({ delay: 10, timeout: 5000 });
+    return { ok: true, reason: "confirmed" };
+  } catch {
+    return { ok: false, reason: "confirm-click-failed" };
+  }
 }
 
-async function tryDelete(page, card) {
+async function tryDelete(page, card, key) {
   if (!(await openMenu(page, card))) return { ok: false, reason: "no-menu" };
 
   // Try to find and click Delete
-  const items = page.locator('div[role="menuitem"], a[role="menuitem"], button[role="menuitem"]');
+  const items = getMenuItemsLocator(page);
   const n = await withTimeout(items.count(), 2000, 0);
 
   if (n === 0) {
@@ -1217,9 +1270,16 @@ async function tryDelete(page, card) {
   for (let i = 0; i < n && i < 10; i++) {
     const t = ((await withTimeout(items.nth(i).innerText().catch(() => ""), 1000, "")) || "").trim();
     if (RE_DELETE.test(t)) {
-      await items.nth(i).click({ delay: 10, timeout: 5000 }).catch(() => {});
+      try {
+        await items.nth(i).click({ delay: 10, timeout: 5000 });
+      } catch {
+        return { ok: false, reason: "delete-click-failed" };
+      }
       await page.waitForTimeout(150);
-      await confirmDeleteIfNeeded(page);
+      const confirm = await confirmDeleteIfNeeded(page);
+      if (!confirm.ok) return { ok: false, reason: confirm.reason };
+      const applied = await waitForActionApplied(page, card, key);
+      if (!applied) return { ok: false, reason: "delete-not-confirmed" };
       return { ok: true, reason: "deleted" };
     }
   }
@@ -1236,7 +1296,7 @@ async function tryDelete(page, card) {
   return { ok: false, reason: "no-delete-item" };
 }
 
-async function tryUndoRepost(page, card) {
+async function tryUndoRepost(page, card, key) {
   if (!HANDLE_REPOSTS) return { ok: false, reason: "repost-disabled" };
 
   // Find the repost/unretweet button - green when active
@@ -1262,7 +1322,11 @@ async function tryUndoRepost(page, card) {
   if (unretweetCount > 0) {
     // Found unretweet button - click it to undo
     log("info", "Found unretweet button, attempting undo...");
-    await unretweetBtn.click({ timeout: 5000 }).catch(() => {});
+    try {
+      await unretweetBtn.click({ timeout: 5000 });
+    } catch {
+      return { ok: false, reason: "unretweet-click-failed" };
+    }
     await page.waitForTimeout(500);  // Wait longer for popup to appear
 
     // Try multiple selectors for the repost popup menu items
@@ -1283,8 +1347,14 @@ async function tryUndoRepost(page, card) {
         const t = ((await withTimeout(items.nth(i).innerText().catch(() => ""), 500, "")) || "").trim();
         if (RE_UNDO_REPOST.test(t)) {
           log("info", `Clicking "${t}" to undo repost...`);
-          await items.nth(i).click({ delay: 10, timeout: 5000 }).catch(() => {});
+          try {
+            await items.nth(i).click({ delay: 10, timeout: 5000 });
+          } catch {
+            return { ok: false, reason: "undo-click-failed" };
+          }
           await page.waitForTimeout(300);
+          const applied = await waitForActionApplied(page, card, key);
+          if (!applied) return { ok: false, reason: "unrepost-not-confirmed" };
           return { ok: true, reason: "unreposted" };
         }
       }
@@ -1294,7 +1364,13 @@ async function tryUndoRepost(page, card) {
     const confirmBtn = page.locator('[data-testid="unretweetConfirm"]').first();
     const confirmCount = await withTimeout(confirmBtn.count(), 500, 0);
     if (confirmCount > 0) {
-      await confirmBtn.click({ timeout: 3000 }).catch(() => {});
+      try {
+        await confirmBtn.click({ timeout: 3000 });
+      } catch {
+        return { ok: false, reason: "undo-click-failed" };
+      }
+      const applied = await waitForActionApplied(page, card, key);
+      if (!applied) return { ok: false, reason: "unrepost-not-confirmed" };
       return { ok: true, reason: "unreposted" };
     }
 
@@ -1457,18 +1533,18 @@ async function processTab(page, tabName, removed, startTime) {
             if (isRetweet && HANDLE_REPOSTS) {
               // Retweet: try unretweet first, then delete as fallback
               log("info", "Detected as retweet - trying unretweet first");
-              repostRes = await tryUndoRepost(page, card);
+              repostRes = await tryUndoRepost(page, card, key);
               res = repostRes;
               if (!repostRes.ok) {
-                deleteRes = await tryDelete(page, card);
+                deleteRes = await tryDelete(page, card, key);
                 res = deleteRes;
               }
             } else {
               // Regular tweet: try delete first, then unretweet as fallback
-              deleteRes = await tryDelete(page, card);
+              deleteRes = await tryDelete(page, card, key);
               res = deleteRes;
               if (!deleteRes.ok && HANDLE_REPOSTS) {
-                repostRes = await tryUndoRepost(page, card);
+                repostRes = await tryUndoRepost(page, card, key);
                 res = repostRes;
               }
             }

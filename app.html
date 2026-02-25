@@ -2331,7 +2331,7 @@
 
     // IPC listeners (using secure preload API)
     api.onCleanupProgress((d) => {
-      const pct = Math.round((d.scanned / d.target) * 100);
+      const pct = d.target > 0 ? Math.min(100, Math.round((d.deleted / d.target) * 100)) : 0;
       document.getElementById('progressNum').textContent = pct + '%';
       document.getElementById('delCount').textContent = d.deleted;
       document.getElementById('protCount').textContent = d.protected;
@@ -2382,7 +2382,7 @@
       }
     });
 
-    api.onCleanupComplete(() => {
+    api.onCleanupComplete((result = {}) => {
       isRunning = false;
 
       // Stop timer
@@ -2391,12 +2391,21 @@
         elapsedInterval = null;
       }
 
-      // Show different message based on whether stopped or completed
-      if (wasStopped) {
+      const stopped = wasStopped || result.stopped === true;
+      const target = Number.isFinite(result.target) ? result.target : (parseInt(config.target, 10) || 0);
+      const deleted = Number.isFinite(result.deleted) ? result.deleted : lastDeletedCount;
+      const finalPct = target > 0 ? Math.min(100, Math.round((deleted / target) * 100)) : 0;
+      document.getElementById('progressNum').textContent = `${finalPct}%`;
+
+      // Show different message based on final run status
+      if (stopped) {
         document.getElementById('progressStatus').textContent = 'Stopped';
-      } else {
+      } else if (result.success === false) {
+        document.getElementById('progressStatus').textContent = 'Failed';
+      } else if (target > 0 && deleted >= target) {
         document.getElementById('progressStatus').textContent = 'Complete!';
-        document.getElementById('progressNum').textContent = '100%';
+      } else {
+        document.getElementById('progressStatus').textContent = 'Finished';
       }
 
       const btn = document.getElementById('actionBtn');
