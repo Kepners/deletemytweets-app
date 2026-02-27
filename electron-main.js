@@ -107,6 +107,7 @@ function getCliPaths() {
 }
 
 function buildCliEnv(config, normalizedHandle, options = {}) {
+  const proxy = typeof config.proxy === 'string' ? config.proxy.trim() : '';
   return {
     ...process.env,
     DMT_HANDLE: normalizedHandle,
@@ -121,6 +122,8 @@ function buildCliEnv(config, normalizedHandle, options = {}) {
     DMT_SPEED: config.speed || 'normal',
     DMT_HEADLESS: config.headless ? 'true' : 'false',
     DMT_PRIVATE_MODE: config.privateMode ? 'true' : 'false',
+    DMT_USE_FIREFOX: config.useFirefox ? 'true' : 'false',
+    DMT_PROXY: proxy,
     ...(options.emitEvents ? { DMT_EMIT_EVENTS: 'true' } : {}),
     ...(options.includeUserData ? { ELECTRON_USER_DATA: app.getPath('userData') } : {})
   };
@@ -206,17 +209,22 @@ ipcMain.on('start-cleanup', async (event, config) => {
               ? payload.count
               : cleanupStats.deleted + 1;
             sendCleanupProgress();
+          } else if (payload.type === 'protected') {
+            cleanupStats.protected += Number.isFinite(payload.delta) ? payload.delta : 1;
+            sendCleanupProgress();
+          } else if (payload.type === 'skipped') {
+            cleanupStats.skipped += Number.isFinite(payload.delta) ? payload.delta : 1;
+            sendCleanupProgress();
           }
         } catch {}
         continue;
       }
       // Detect log type from content
       let type = 'info';
-      if (clean.includes('DELETE')) {
+      if (clean.includes('Deleted confirmed')) {
         type = 'delete';
       } else if (clean.includes('Protected')) {
         type = 'protect';
-        cleanupStats.protected++;
       } else if (
         clean.includes('Outside range') ||
         clean.includes('SKIPPED') ||
@@ -224,7 +232,6 @@ ipcMain.on('start-cleanup', async (event, config) => {
         clean.includes('Unknown date, skipping')
       ) {
         type = 'skip';
-        cleanupStats.skipped++;
       } else if (clean.includes('ERROR') || clean.includes('Error') || clean.includes('error')) {
         type = 'error';
       } else if (clean.includes('SUCCESS') || clean.includes('Completed')) {

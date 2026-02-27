@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.3.38] - 2026-02-27
+
+### Fixed
+- **Strict deletion verification** to avoid false positives.
+  - Action success now requires the target status card to disappear from the timeline.
+  - Added a post-delete status URL verification check before counting deletion success.
+  - Removed permissive success path based on locator key drift.
+  - Work items now track status IDs and reacquire cards by status ID before acting.
+- **Misleading delete logs** in the desktop app.
+  - Candidate tweets no longer emit delete-style logs before confirmation.
+  - Delete log styling now only applies to explicit `Deleted confirmed` entries.
+- **Menu targeting resilience** for X UI variants.
+  - Added fallback "More" button selectors beyond `data-testid="caret"`.
+- **Anti-detection settings now actually wired through runtime.**
+  - Added `useFirefox` and `proxy` flow from GUI -> Electron env -> automation engine.
+  - Added Firefox private mode vs profile mode behavior (private toggle now changes runtime mode).
+  - Added Firefox launch path with Chromium fallback and proxy support.
+- **Progress counter reliability** in the desktop app.
+  - Added structured `protected` and `skipped` events from the automation engine.
+  - Removed log-text counter increments that could drift from real counts.
+
 ## [1.3.37] - 2026-02-25
 
 ### Fixed

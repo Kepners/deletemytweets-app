@@ -5,7 +5,7 @@
 
 const fs = require("fs");
 const path = require("path");
-const { chromium } = require("playwright");
+const { chromium, firefox } = require("playwright");
 
 // Check if running in CLI mode (not embedded in Electron)
 const IS_CLI = require.main === module;
@@ -370,6 +370,7 @@ let MAX_ACTION_RETRIES = RETRY_PRESETS.normal.action;
 const RETRYABLE_ACTION_REASONS = new Set([
   "no-menu",
   "menu-empty",
+  "card-not-found",
   "no-delete-item",
   "no-unretweet-btn",
   "no-undo-item",
@@ -377,6 +378,7 @@ const RETRYABLE_ACTION_REASONS = new Set([
   "delete-click-failed",
   "confirm-click-failed",
   "delete-not-confirmed",
+  "status-still-accessible",
   "unretweet-click-failed",
   "undo-click-failed",
   "unrepost-not-confirmed"
@@ -413,6 +415,8 @@ let HANDLE_REPOSTS = false;
 let TARGET = 10000;  // Default to large batch for "set and forget" usage
 let HEADLESS = false;
 let PRIVATE_MODE = false;  // Use fresh browser instead of Edge profile
+let USE_FIREFOX = false;   // Use Firefox engine for anti-detection mode
+let PROXY_SERVER = null;   // Optional proxy server (http://host:port)
 let SPEED = "normal";
 let MIN_DELAY_MS = 1200;
 let MAX_DELAY_MS = 2200;
@@ -473,6 +477,8 @@ function parseEnvConfig() {
   TARGET = parseInt(process.env.DMT_TARGET ?? process.env.TARGET ?? "10000", 10);
   HEADLESS = (process.env.DMT_HEADLESS ?? process.env.HEADLESS ?? "false") === "true";
   PRIVATE_MODE = (process.env.DMT_PRIVATE_MODE ?? process.env.PRIVATE_MODE ?? "false") === "true";
+  USE_FIREFOX = (process.env.DMT_USE_FIREFOX ?? process.env.USE_FIREFOX ?? "false") === "true";
+  PROXY_SERVER = normalizeProxy(process.env.DMT_PROXY ?? process.env.PROXY ?? "");
   SPEED = process.env.DMT_SPEED ?? process.env.SPEED ?? "normal";
 
   const delays = SPEED_PRESETS[SPEED] || SPEED_PRESETS.normal;
@@ -518,6 +524,15 @@ function getRetryEntry(retryState, key) {
     retryState.set(key, entry);
   }
   return entry;
+}
+
+function normalizeProxy(rawProxy) {
+  if (typeof rawProxy !== "string") return null;
+  const trimmed = rawProxy.trim();
+  if (!trimmed) return null;
+  if (/^(http|https|socks4|socks5):\/\//i.test(trimmed)) return trimmed;
+  if (/^[^:\s]+:\d{2,5}$/.test(trimmed)) return `http://${trimmed}`;
+  return null;
 }
 
 function finalizeSeenKey(seen, retryState, key) {
@@ -1165,11 +1180,17 @@ async function statusKey(card) {
 }
 
 async function openMenu(page, card) {
-  // IMPORTANT: Only target the caret/more button, NOT repost/like/reply buttons
-  // The caret button has data-testid="caret" - be specific to avoid clicking repost button
+  // IMPORTANT: Only target "more actions" controls, never repost/like/reply buttons.
+  // X occasionally changes this control across variants/locales.
   const more = card.locator([
     'button[data-testid="caret"]',
-    'div[data-testid="caret"]'
+    'div[data-testid="caret"]',
+    'button[aria-label="More"]',
+    'div[aria-label="More"]',
+    'button[aria-label="More actions"]',
+    'button[aria-label="More options"]',
+    'button[aria-label*="More"]',
+    'div[aria-label*="More"]'
   ].join(", "));
   if (!(await more.count())) return false;
   try {
@@ -1195,26 +1216,68 @@ function statusIdFromKey(key) {
   return m ? m[1] : null;
 }
 
-async function waitForActionApplied(page, card, key, timeoutMs = 7000) {
+function cardByStatusId(page, statusId) {
+  if (!statusId) return null;
+  return allCards(page)
+    .filter({ has: page.locator(`a[href*="/status/${statusId}"]`) })
+    .first();
+}
+
+async function waitForActionApplied(page, statusId, timeoutMs = 7000) {
+  if (!statusId) return false;
   const deadline = Date.now() + timeoutMs;
-  const statusId = statusIdFromKey(key);
-  const statusLocator = statusId
-    ? page.locator(`a[href*="/status/${statusId}"]`)
-    : null;
 
   while (Date.now() < deadline) {
-    const currentKey = await statusKey(card);
-    if (!currentKey || currentKey !== key) return true;
-
-    if (statusLocator) {
-      const count = await withTimeout(statusLocator.count(), 1000, 0);
-      if (count === 0) return true;
-    }
-
+    const targetCard = cardByStatusId(page, statusId);
+    const count = await withTimeout(targetCard.count(), 1000, 0);
+    if (count === 0) return true;
     await page.waitForTimeout(250);
   }
 
   return false;
+}
+
+async function verifyDeletedViaStatusRequest(context, statusId) {
+  if (!context || !statusId) return { ok: false, reason: "status-check-error" };
+  const statusPath = `/status/${statusId}`;
+  const statusUrl = `https://x.com/i/web${statusPath}`;
+
+  try {
+    const response = await context.request.get(statusUrl, {
+      timeout: 10000,
+      failOnStatusCode: false
+    });
+
+    const httpStatus = response.status();
+    if (httpStatus >= 400) {
+      return { ok: true, reason: `http-${httpStatus}` };
+    }
+
+    const finalUrl = (response.url() || "").toLowerCase();
+    if (finalUrl && !finalUrl.includes(statusPath)) {
+      return { ok: true, reason: `redirected-${httpStatus}` };
+    }
+
+    const body = (await response.text()).toLowerCase();
+    const deletedMarkers = [
+      "this post was deleted",
+      "this post is unavailable",
+      "this page doesn't exist",
+      "this page doesn’t exist",
+      "post unavailable"
+    ];
+    if (deletedMarkers.some(marker => body.includes(marker))) {
+      return { ok: true, reason: "body-marker" };
+    }
+
+    if (body.includes(statusPath)) {
+      return { ok: false, reason: "status-still-accessible" };
+    }
+
+    return { ok: false, reason: "status-check-uncertain" };
+  } catch {
+    return { ok: false, reason: "status-check-error" };
+  }
 }
 
 async function menuHasDelete(page, card) {
@@ -1254,7 +1317,7 @@ async function confirmDeleteIfNeeded(page) {
   }
 }
 
-async function tryDelete(page, card, key) {
+async function tryDelete(page, card, key, statusId = statusIdFromKey(key)) {
   if (!(await openMenu(page, card))) return { ok: false, reason: "no-menu" };
 
   // Try to find and click Delete
@@ -1278,8 +1341,15 @@ async function tryDelete(page, card, key) {
       await page.waitForTimeout(150);
       const confirm = await confirmDeleteIfNeeded(page);
       if (!confirm.ok) return { ok: false, reason: confirm.reason };
-      const applied = await waitForActionApplied(page, card, key);
+      const applied = await waitForActionApplied(page, statusId);
       if (!applied) return { ok: false, reason: "delete-not-confirmed" };
+      const postCheck = await verifyDeletedViaStatusRequest(page.context(), statusId);
+      if (!postCheck.ok && postCheck.reason === "status-still-accessible") {
+        return { ok: false, reason: postCheck.reason };
+      }
+      if (!postCheck.ok) {
+        log("warn", `Post-delete check inconclusive (${postCheck.reason}); accepting DOM confirmation`);
+      }
       return { ok: true, reason: "deleted" };
     }
   }
@@ -1296,7 +1366,7 @@ async function tryDelete(page, card, key) {
   return { ok: false, reason: "no-delete-item" };
 }
 
-async function tryUndoRepost(page, card, key) {
+async function tryUndoRepost(page, card, key, statusId = statusIdFromKey(key)) {
   if (!HANDLE_REPOSTS) return { ok: false, reason: "repost-disabled" };
 
   // Find the repost/unretweet button - green when active
@@ -1353,7 +1423,7 @@ async function tryUndoRepost(page, card, key) {
             return { ok: false, reason: "undo-click-failed" };
           }
           await page.waitForTimeout(300);
-          const applied = await waitForActionApplied(page, card, key);
+          const applied = await waitForActionApplied(page, statusId);
           if (!applied) return { ok: false, reason: "unrepost-not-confirmed" };
           return { ok: true, reason: "unreposted" };
         }
@@ -1369,7 +1439,7 @@ async function tryUndoRepost(page, card, key) {
       } catch {
         return { ok: false, reason: "undo-click-failed" };
       }
-      const applied = await waitForActionApplied(page, card, key);
+      const applied = await waitForActionApplied(page, statusId);
       if (!applied) return { ok: false, reason: "unrepost-not-confirmed" };
       return { ok: true, reason: "unreposted" };
     }
@@ -1410,6 +1480,7 @@ async function collectWorklist(page, want, seen, retryState, seenEver) {
       }
       log("warn", `Unknown date, skipping`, `"${dateCheck.preview}"`);
       finalizeSeenKey(seen, retryState, key);
+      emitEvent("skipped", { delta: 1, reason: "unknown-date" });
       continue;
     }
 
@@ -1417,15 +1488,17 @@ async function collectWorklist(page, want, seen, retryState, seenEver) {
     if (dateCheck.decision === "protect") {
       log("protect", chalk.green(`${dateCheck.dateStr} Protected`), chalk.gray(`"${dateCheck.preview}"`));
       finalizeSeenKey(seen, retryState, key);
+      emitEvent("protected", { delta: 1 });
       continue;
     }
     if (dateCheck.decision === "too-old") {
       log("skip", chalk.gray(`${dateCheck.dateStr} Too old, kept`), chalk.gray(`"${dateCheck.preview}"`));
       finalizeSeenKey(seen, retryState, key);
+      emitEvent("skipped", { delta: 1, reason: "too-old" });
       continue;
     }
 
-    log("delete", chalk.red(`${dateCheck.dateStr} → DELETE`), chalk.gray(`"${dateCheck.preview}"`));
+    log("info", `${dateCheck.dateStr} in range (candidate)`, chalk.gray(`"${dateCheck.preview}"`));
 
     const ownership = await isYours(page, card);
     if (!ownership.yours) {
@@ -1438,6 +1511,7 @@ async function collectWorklist(page, want, seen, retryState, seenEver) {
         log("info", `Ownership unresolved after retries (${ownership.reason}), skipping`);
       }
       finalizeSeenKey(seen, retryState, key);
+      emitEvent("skipped", { delta: 1, reason: ownership.reason || "not-yours" });
       continue;
     }
 
@@ -1445,7 +1519,13 @@ async function collectWorklist(page, want, seen, retryState, seenEver) {
     // Preserve repost signal from ownership check; only re-check if still unknown.
     const isRetweet = ownership.isRetweet || (HANDLE_REPOSTS && await isUserRepost(card));
     seen.add(key); // Mark as in-flight; will be unmarked on retryable action failures.
-    mine.push({ key, card, isRetweet });
+    const statusId = statusIdFromKey(key);
+    if (!statusId) {
+      finalizeSeenKey(seen, retryState, key);
+      emitEvent("skipped", { delta: 1, reason: "missing-status-id" });
+      continue;
+    }
+    mine.push({ key, statusId, isRetweet });
   }
   return mine;
 }
@@ -1505,10 +1585,19 @@ async function processTab(page, tabName, removed, startTime) {
         for (const workItem of work) {
           if (isAborted() || removed.count >= TARGET) break;
 
-          // Extract card and pre-computed isRetweet from worklist
+          // Extract identifiers and pre-computed repost signal from worklist
           const key = workItem.key;
-          const card = workItem.card;
+          const statusId = workItem.statusId;
+          const card = cardByStatusId(page, statusId);
           const isRetweet = workItem.isRetweet;
+
+          const cardCount = await withTimeout(card.count(), 1200, 0);
+          if (cardCount === 0) {
+            log("info", "Card moved before action, retrying...");
+            const willRetry = registerActionFailure(globalSeen, retryState, key, "card-not-found");
+            if (!willRetry) emitEvent("skipped", { delta: 1, reason: "card-not-found" });
+            continue;
+          }
 
           try {
             // Kill any videos BEFORE scrolling to prevent network stalling
@@ -1533,18 +1622,18 @@ async function processTab(page, tabName, removed, startTime) {
             if (isRetweet && HANDLE_REPOSTS) {
               // Retweet: try unretweet first, then delete as fallback
               log("info", "Detected as retweet - trying unretweet first");
-              repostRes = await tryUndoRepost(page, card, key);
+              repostRes = await tryUndoRepost(page, card, key, statusId);
               res = repostRes;
               if (!repostRes.ok) {
-                deleteRes = await tryDelete(page, card, key);
+                deleteRes = await tryDelete(page, card, key, statusId);
                 res = deleteRes;
               }
             } else {
               // Regular tweet: try delete first, then unretweet as fallback
-              deleteRes = await tryDelete(page, card, key);
+              deleteRes = await tryDelete(page, card, key, statusId);
               res = deleteRes;
               if (!deleteRes.ok && HANDLE_REPOSTS) {
-                repostRes = await tryUndoRepost(page, card, key);
+                repostRes = await tryUndoRepost(page, card, key, statusId);
                 res = repostRes;
               }
             }
@@ -1563,15 +1652,18 @@ async function processTab(page, tabName, removed, startTime) {
                 .filter(reason => reason && reason !== "not-tried");
               const retryableReason = reasons.find(reason => RETRYABLE_ACTION_REASONS.has(reason));
               if (retryableReason) {
-                registerActionFailure(globalSeen, retryState, key, retryableReason);
+                const willRetry = registerActionFailure(globalSeen, retryState, key, retryableReason);
+                if (!willRetry) emitEvent("skipped", { delta: 1, reason: retryableReason });
               } else if (key) {
                 finalizeSeenKey(globalSeen, retryState, key);
+                emitEvent("skipped", { delta: 1, reason: res.reason || "action-failed" });
               }
             }
 
             if (res.ok) {
               removed.count++;
               deletedThisSweep++;
+              log("delete", `Deleted confirmed (${res.reason})`, key);
               emitEvent("deleted", { count: removed.count });
               updateProgress(removed.count, tabName, TARGET);
               lastProgressTime = Date.now();
@@ -1579,10 +1671,11 @@ async function processTab(page, tabName, removed, startTime) {
             }
           } catch (e) {
             log("error", "Delete failed (continuing)", e?.message || e);
-            registerActionFailure(globalSeen, retryState, key, "exception", {
+            const willRetry = registerActionFailure(globalSeen, retryState, key, "exception", {
               forceRetry: true,
               label: "after exception"
             });
+            if (!willRetry) emitEvent("skipped", { delta: 1, reason: "exception" });
           }
 
           await pauseLikeHuman(page, removed.count, rhythmState);
@@ -1674,22 +1767,9 @@ async function run() {
   });
 
   const launchSpinner = ora({
-    text: chalk.cyan('Checking for browser...'),
+    text: chalk.cyan(USE_FIREFOX ? 'Launching Firefox...' : 'Checking for browser...'),
     spinner: 'dots12'
   }).start();
-
-  // Check for supported browser (Edge or Chrome)
-  BROWSER_CHANNEL = getBrowserChannel();
-  if (!BROWSER_CHANNEL) {
-    launchSpinner.fail(chalk.red('No supported browser found!'));
-    log("error", "Delete My Tweets requires Microsoft Edge or Google Chrome to be installed.");
-    log("info", "Please install Edge or Chrome and try again.");
-    log("info", "Download Edge: https://www.microsoft.com/edge");
-    log("info", "Download Chrome: https://www.google.com/chrome");
-    return;
-  }
-
-  launchSpinner.text = chalk.cyan(`Launching ${BROWSER_CHANNEL === 'msedge' ? 'Edge' : 'Chrome'}...`);
 
   let context, browser, page;
 
@@ -1706,79 +1786,150 @@ async function run() {
     "--no-sandbox"  // Required for some environments
   ];
 
-  // Private mode: always use fresh browser (no Edge profile)
-  if (PRIVATE_MODE) {
-    log("info", "Using private browser mode (fresh session)");
-    browser = await chromium.launch({
-      headless: HEADLESS,
-      channel: BROWSER_CHANNEL,
-      args: browserArgs,
-      ignoreDefaultArgs: ["--enable-automation"]
-    });
-    // Use handle-specific storage if it exists and is valid
-    const handleStorage = getStoragePath(PROFILE_HANDLE);
-    const useStorage = isSessionValid(PROFILE_HANDLE) ? handleStorage : undefined;
+  const handleStorage = getStoragePath(PROFILE_HANDLE);
+  const useStorage = isSessionValid(PROFILE_HANDLE) ? handleStorage : undefined;
+  const launchProxy = PROXY_SERVER ? { server: PROXY_SERVER } : undefined;
 
-    context = await browser.newContext({
-      storageState: useStorage
-    });
-    page = await context.newPage();
-  } else if (BROWSER_CHANNEL === 'msedge') {
-    // Try to use Edge profile (has extensions like 1Password)
-    const userDataDir = process.env.EDGE_USER_DATA || path.join(process.env.LOCALAPPDATA || '', 'Microsoft', 'Edge', 'User Data');
-    const profileDir = process.env.EDGE_PROFILE || 'Default';
+  const launchChromium = async () => {
+    // Check for supported browser (Edge or Chrome)
+    BROWSER_CHANNEL = getBrowserChannel();
+    if (!BROWSER_CHANNEL) {
+      log("error", "No supported Chromium browser found.");
+      log("info", "Install Microsoft Edge or Google Chrome, or disable Firefox mode.");
+      throw new Error("No supported browser found (Edge/Chrome unavailable)");
+    }
+    launchSpinner.text = chalk.cyan(`Launching ${BROWSER_CHANNEL === 'msedge' ? 'Edge' : 'Chrome'}...`);
 
-    try {
-      context = await chromium.launchPersistentContext(
-        path.join(userDataDir, profileDir),
-        {
-          headless: HEADLESS,
-          channel: BROWSER_CHANNEL,
-          args: [
-            ...browserArgs,
-            "--no-first-run",
-            "--no-default-browser-check",
-            "--enable-extensions",
-            "--disable-component-extensions-with-background-pages=false"
-          ],
-          ignoreDefaultArgs: ["--disable-extensions", "--enable-automation"]
-        }
-      );
-      page = context.pages()[0] || await context.newPage();
-      log("success", "Using your Edge profile with extensions");
-    } catch (err) {
-      // Fallback: Edge might be open, use fresh profile instead
-      log("warn", "Edge may be open. Using fresh browser (close Edge for full access)");
+    // Private mode: always use fresh browser (no Edge profile)
+    if (PRIVATE_MODE) {
+      log("info", "Using private browser mode (fresh session)");
       browser = await chromium.launch({
         headless: HEADLESS,
         channel: BROWSER_CHANNEL,
+        proxy: launchProxy,
         args: browserArgs,
         ignoreDefaultArgs: ["--enable-automation"]
       });
-      const handleStorage = getStoragePath(PROFILE_HANDLE);
-      const useStorage = isSessionValid(PROFILE_HANDLE) ? handleStorage : undefined;
-
       context = await browser.newContext({
         storageState: useStorage
       });
       page = await context.newPage();
+      return;
     }
-  } else {
+
+    if (BROWSER_CHANNEL === 'msedge') {
+      // Try to use Edge profile (has extensions like 1Password)
+      const userDataDir = process.env.EDGE_USER_DATA || path.join(process.env.LOCALAPPDATA || '', 'Microsoft', 'Edge', 'User Data');
+      const profileDir = process.env.EDGE_PROFILE || 'Default';
+
+      try {
+        context = await chromium.launchPersistentContext(
+          path.join(userDataDir, profileDir),
+          {
+            headless: HEADLESS,
+            channel: BROWSER_CHANNEL,
+            proxy: launchProxy,
+            args: [
+              ...browserArgs,
+              "--no-first-run",
+              "--no-default-browser-check",
+              "--enable-extensions",
+              "--disable-component-extensions-with-background-pages=false"
+            ],
+            ignoreDefaultArgs: ["--disable-extensions", "--enable-automation"]
+          }
+        );
+        page = context.pages()[0] || await context.newPage();
+        log("success", "Using your Edge profile with extensions");
+        return;
+      } catch (err) {
+        // Fallback: Edge might be open, use fresh profile instead
+        log("warn", "Edge may be open. Using fresh browser (close Edge for full access)");
+        browser = await chromium.launch({
+          headless: HEADLESS,
+          channel: BROWSER_CHANNEL,
+          proxy: launchProxy,
+          args: browserArgs,
+          ignoreDefaultArgs: ["--enable-automation"]
+        });
+        context = await browser.newContext({
+          storageState: useStorage
+        });
+        page = await context.newPage();
+        return;
+      }
+    }
+
     // Chrome doesn't support profile mode the same way, use fresh browser
     log("info", "Using Chrome (fresh session)");
     browser = await chromium.launch({
       headless: HEADLESS,
       channel: BROWSER_CHANNEL,
+      proxy: launchProxy,
       args: browserArgs,
       ignoreDefaultArgs: ["--enable-automation"]
     });
-    const handleStorage = getStoragePath(PROFILE_HANDLE);
-    const useStorage = isSessionValid(PROFILE_HANDLE) ? handleStorage : undefined;
-
     context = await browser.newContext({
       storageState: useStorage
     });
     page = await context.newPage();
+  };
+
+  if (USE_FIREFOX) {
+    launchSpinner.text = chalk.cyan("Launching Firefox...");
+    try {
+      // Vary viewport a bit to avoid perfectly identical sessions.
+      const viewport = {
+        width: rand(1180, 1520),
+        height: rand(780, 980)
+      };
+
+      if (PRIVATE_MODE) {
+        browser = await firefox.launch({
+          headless: HEADLESS,
+          proxy: launchProxy
+        });
+        context = await browser.newContext({
+          storageState: useStorage,
+          viewport
+        });
+        page = await context.newPage();
+        log("info", `Using Firefox private mode (${viewport.width}x${viewport.height})`);
+      } else {
+        const firefoxProfileDir = path.join(
+          process.env.ELECTRON_USER_DATA || __dirname,
+          "firefox-profile",
+          PROFILE_HANDLE || "default"
+        );
+        try {
+          context = await firefox.launchPersistentContext(firefoxProfileDir, {
+            headless: HEADLESS,
+            proxy: launchProxy,
+            storageState: useStorage,
+            viewport
+          });
+          page = context.pages()[0] || await context.newPage();
+          log("info", `Using Firefox profile mode (${viewport.width}x${viewport.height})`);
+        } catch (profileErr) {
+          log("warn", `Firefox profile mode unavailable, using fresh Firefox session: ${profileErr?.message || profileErr}`);
+          browser = await firefox.launch({
+            headless: HEADLESS,
+            proxy: launchProxy
+          });
+          context = await browser.newContext({
+            storageState: useStorage,
+            viewport
+          });
+          page = await context.newPage();
+          log("info", `Using Firefox fresh mode (${viewport.width}x${viewport.height})`);
+        }
+      }
+    } catch (err) {
+      log("warn", `Firefox launch failed, falling back to Chromium: ${err?.message || err}`);
+      await launchChromium();
+    }
+  } else {
+    await launchChromium();
   }
 
   launchSpinner.succeed(chalk.green('Browser ready'));
@@ -1886,6 +2037,8 @@ async function runCleanup(config, callbacks = {}) {
   SPEED = config.speed || 'normal';
   HEADLESS = config.headless === true; // Only headless if explicitly set - default to showing browser for login
   PRIVATE_MODE = config.privateMode === true; // Use fresh browser instead of Edge profile
+  USE_FIREFOX = config.useFirefox === true;
+  PROXY_SERVER = normalizeProxy(config.proxy);
 
   // Set delays based on speed
   const delays = SPEED_PRESETS[SPEED] || SPEED_PRESETS.normal;

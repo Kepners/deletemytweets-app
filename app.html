@@ -1358,6 +1358,8 @@
       deleteMonth: 12, deleteYear: 2014,
       protectMonth: new Date().getMonth() + 1, // Current month (1-12)
       protectYear: new Date().getFullYear(),
+      useFirefox: true,
+      proxy: '',
       privateMode: false  // Use private/fresh browser instead of Edge profile
     };
     let isRunning = false;
@@ -2298,7 +2300,7 @@
       config.deleteYear = parseInt(document.getElementById('deleteYear').value);
       config.protectMonth = parseInt(document.getElementById('protectMonth').value);
       config.protectYear = parseInt(document.getElementById('protectYear').value);
-      config.useFirefox = config.useFirefox !== false;  // Default to true (toggle handler maintains this)
+      config.useFirefox = document.querySelector('[data-setting="useFirefox"]').classList.contains('on');
       config.proxy = document.getElementById('proxyInput').value.trim() || null;
 
       document.querySelector('[data-tab="progress"]').click();
