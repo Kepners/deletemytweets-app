@@ -355,8 +355,8 @@ const configPath = path.join(app.getPath('userData'), 'config.json');
 // ═══════════════════════════════════════════════════════════
 const licensePath = path.join(app.getPath('userData'), 'license.json');
 
-// License validation API URL
-const LICENSE_API_URL = 'https://deletemytweets.app/api/validate-license';
+// Use the canonical host so POST validation never depends on an apex redirect.
+const LICENSE_API_URL = 'https://www.deletemytweets.app/api/validate-license';
 
 async function validateLicenseWithServer(licenseKey) {
   const fetch = require('node-fetch');
