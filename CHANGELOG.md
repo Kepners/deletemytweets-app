@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.3.40] - 2026-04-02
+
+### Changed
+- **Fresh installs now default to rolling date windows.**
+  - New GUI launches start in rolling keep mode so the selection follows the current month.
+  - Legacy fixed-date configs now show a warning banner so users can migrate at their own pace.
+  - The rolling range is still configurable for both "delete recent N months" and "keep recent N months".
+
+### Fixed
+- **Protect mode** now works in the GUI instead of falling back to delete mode.
+- **Stale protect defaults** no longer hard-code an old year for new runs.
+
 ## [1.3.39] - 2026-04-02
 
 ### Fixed

@@ -20,8 +20,8 @@ Available as both a **Desktop GUI App** (Electron) and a **CLI tool**.
 ### Desktop App (Recommended)
 
 Download from the [Releases](https://github.com/Kepners/deletemytweets/releases) page:
-- **Portable**: `Delete My Tweets 1.3.39.exe` - No installation needed, just run
-- **Installer**: `Delete My Tweets Setup 1.3.39.exe` - Traditional Windows installer
+- **Portable**: `Delete My Tweets 1.3.40.exe` - No installation needed, just run
+- **Installer**: `Delete My Tweets Setup 1.3.40.exe` - Traditional Windows installer
 
 ### From Source
 
@@ -42,7 +42,7 @@ npx playwright install chromium
    - Select content types (Posts, Replies, Reposts)
    - Set "Delete Before" date (month + year)
    - Set "Protect After" date (month + year)
-   - Optional: enable "Rolling window" to make the range follow the current month
+   - Rolling window is enabled by default in the desktop app on new installs, so the range follows the current month automatically
    - Set target count
    - Toggle "Show browser window" for faster deletion + live view
 4. **Start**: Click "Start Cleanup"
@@ -78,8 +78,8 @@ npm start
 npm run build
 
 # Output in dist/ folder:
-# - Delete My Tweets 1.3.39.exe (portable)
-# - Delete My Tweets Setup 1.3.39.exe (installer)
+# - Delete My Tweets 1.3.40.exe (portable)
+# - Delete My Tweets Setup 1.3.40.exe (installer)
 ```
 
 ## Configuration
@@ -91,7 +91,7 @@ npm run build
 | **Content Types** | Checkboxes to include Posts, Replies, and/or Reposts |
 | **Delete Before** | Month and year threshold - delete tweets older than this |
 | **Protect After** | Month and year threshold - never delete tweets newer than this |
-| **Rolling window** | When enabled, the selected range follows the current month automatically |
+| **Rolling window** | When enabled, the selected range follows the current month automatically. This is the desktop app default on new installs |
 | **Months** | Rolling window length in calendar months |
 | **Target Count** | Maximum number of tweets to delete per run |
 | **Speed** | Aggressive (fast, 0.6-1s delays), Normal (1.2-2.2s), or Conservative (2.5-4s) |
@@ -163,6 +163,8 @@ ROLLING_WINDOW=true ROLLING_MONTHS=3 SLIDER_MODE=delete HANDLE_REPOSTS=true node
 ROLLING_WINDOW=true ROLLING_MONTHS=3 SLIDER_MODE=protect HANDLE_REPOSTS=true node index.js myhandle
 ```
 
+> Legacy saved configs that still use fixed dates will show a warning banner in the GUI until you switch to rolling window.
+
 ### Run in headless mode (no visible browser)
 ```bash
 HEADLESS=true node index.js myhandle
@@ -202,8 +204,8 @@ deletemytweets/
 ├── START_APP.bat      # Windows launcher script
 ├── icon.ico           # App icon
 └── dist/              # Built executables (after npm run build)
-    ├── Delete My Tweets 1.3.39.exe        # Portable executable
-    └── Delete My Tweets Setup 1.3.39.exe  # Windows installer
+    ├── Delete My Tweets 1.3.40.exe        # Portable executable
+    └── Delete My Tweets Setup 1.3.40.exe  # Windows installer
 ```
 
 ## Tech Stack

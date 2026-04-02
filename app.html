@@ -989,6 +989,17 @@
       text-align: center;
       padding: 8px 0 4px;
     }
+
+    .date-warning {
+      padding: 8px 12px;
+      margin: 4px 0 8px;
+      background: rgba(255,42,109,0.15);
+      border-radius: 8px;
+      border-left: 3px solid var(--coral);
+      color: var(--coral);
+      font-size: 10px;
+      line-height: 1.4;
+    }
   </style>
 </head>
 <body>
@@ -1063,8 +1074,8 @@
           <div class="card-row">
             <span class="card-label">Selection Mode</span>
             <div class="mode-toggle">
-              <button class="mode-btn active" data-mode="delete" id="modeDelete">🗑 Delete</button>
-              <button class="mode-btn" data-mode="protect" id="modeProtect">🛡 Keep</button>
+              <button class="mode-btn" data-mode="delete" id="modeDelete">🗑 Delete</button>
+              <button class="mode-btn active protect" data-mode="protect" id="modeProtect">🛡 Keep</button>
             </div>
           </div>
 
@@ -1080,7 +1091,11 @@
 
           <!-- Current Selection Display -->
           <div class="date-display" id="dateDisplay">
-            Dec 2014 → Jan 2026
+            Rolling keep recent 3 months
+          </div>
+
+          <div class="date-warning" id="dateRangeWarning" style="display:none;">
+            This profile is using fixed date thresholds. Enable Rolling window to keep the range moving over time.
           </div>
 
           <!-- Timeline Slider -->
@@ -1092,7 +1107,7 @@
             </div>
             <div class="timeline-labels">
               <span>2006</span>
-              <span id="currentYearLabel">2026</span>
+              <span id="currentYearLabel">Current</span>
             </div>
           </div>
 
@@ -1100,11 +1115,11 @@
           <div class="selection-summary">
             <div class="summary-row delete">
               <span class="icon">🗑</span>
-              <span id="deleteSummary">Delete: Dec 2014 → Jan 2026</span>
+              <span id="deleteSummary">Delete: Older than rolling window</span>
             </div>
             <div class="summary-row protect">
               <span class="icon">🛡</span>
-              <span id="protectSummary">Keep: Before Dec 2014, After Jan 2026</span>
+              <span id="protectSummary">Keep recent 3 months</span>
             </div>
           </div>
 
@@ -1375,8 +1390,8 @@
       deleteMonth: 12, deleteYear: 2014,
       protectMonth: new Date().getMonth() + 1, // Current month (1-12)
       protectYear: new Date().getFullYear(),
-      sliderMode: 'delete',
-      rollingWindow: false,
+      sliderMode: 'protect',
+      rollingWindow: true,
       rollingMonths: 3,
       useFirefox: true,
       proxy: '',
@@ -1384,6 +1399,7 @@
     };
     let isRunning = false;
     let hasValidLicense = false;
+    let legacyDateConfig = false;
     const HANDLE_PATTERN = /^[A-Za-z0-9_]{1,15}$/;
 
     function normalizeHandle(rawHandle) {
@@ -1789,7 +1805,7 @@
           }
         }
         if (s === 'rollingWindow') {
-          refreshDateRangeUI();
+          updateSliderUI();
         }
         // Save settings
         api.saveConfig( config);
@@ -1836,7 +1852,7 @@
     document.getElementById('rollingMonths').addEventListener('input', (e) => {
       config.rollingMonths = Math.max(1, parseInt(e.target.value, 10) || 3);
       if (config.rollingWindow) {
-        refreshDateRangeUI();
+        updateSliderUI();
       }
       api.saveConfig(config);
     });
@@ -1907,7 +1923,14 @@
       return { start: sliderStart, end: sliderEnd };
     }
 
+    function updateLegacyDateWarning() {
+      const warning = document.getElementById('dateRangeWarning');
+      if (!warning) return;
+      warning.style.display = legacyDateConfig && !config.rollingWindow ? 'block' : 'none';
+    }
+
     function updateSliderUI() {
+      updateLegacyDateWarning();
       const rollingActive = !!config.rollingWindow;
       const range = getActiveRange();
       const rollingMonths = getRollingMonths();
@@ -1985,6 +2008,14 @@
     function syncToConfig(range = getActiveRange()) {
       config.sliderMode = sliderMode;
       if (config.rollingWindow) {
+        document.getElementById('deleteMonth').value = range.start.month;
+        document.getElementById('deleteYear').value = range.start.year;
+        document.getElementById('protectMonth').value = range.end.month;
+        document.getElementById('protectYear').value = range.end.year;
+        config.deleteMonth = range.start.month;
+        config.deleteYear = range.start.year;
+        config.protectMonth = range.end.month;
+        config.protectYear = range.end.year;
         config.rollingMonths = getRollingMonths();
         api.saveConfig(config);
         return;
@@ -2538,6 +2569,41 @@
 
     api.onLoadConfig((c) => {
       if (c) {
+        const hasStoredConfig = Object.keys(c).length > 0;
+        const hasRollingWindowSetting = Object.prototype.hasOwnProperty.call(c, 'rollingWindow');
+        legacyDateConfig = hasStoredConfig && c.rollingWindow !== true;
+
+        if (!hasStoredConfig) {
+          config.sliderMode = 'protect';
+          config.rollingWindow = true;
+          config.rollingMonths = 3;
+          sliderMode = 'protect';
+
+          const rollingRange = getRollingRange(config.rollingMonths);
+          sliderStart = rollingRange.start;
+          sliderEnd = rollingRange.end;
+
+          document.querySelector('[data-setting="rollingWindow"]').classList.add('on');
+          document.getElementById('modeDelete').classList.remove('active');
+          document.getElementById('modeProtect').classList.add('active');
+          document.getElementById('modeProtect').classList.add('protect');
+          document.getElementById('rollingMonths').value = config.rollingMonths;
+          document.getElementById('deleteMonth').value = rollingRange.start.month;
+          document.getElementById('deleteYear').value = rollingRange.start.year;
+          document.getElementById('protectMonth').value = rollingRange.end.month;
+          document.getElementById('protectYear').value = rollingRange.end.year;
+          config.deleteMonth = rollingRange.start.month;
+          config.deleteYear = rollingRange.start.year;
+          config.protectMonth = rollingRange.end.month;
+          config.protectYear = rollingRange.end.year;
+        } else if (!hasRollingWindowSetting) {
+          config.rollingWindow = false;
+          document.querySelector('[data-setting="rollingWindow"]').classList.remove('on');
+          if (!c.sliderMode) {
+            sliderMode = 'delete';
+          }
+        }
+
         // Restore handle
         if (c.handle) {
           const restoredHandle = setCurrentHandle(c.handle);
