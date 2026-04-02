@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.3.41] - 2026-04-02
+
+### Fixed
+- **Windows packaging now uses a buildable `better-sqlite3` release.**
+  - Downgraded the native dependency to `11.10.0`, which still ships Electron 28 prebuilds.
+  - This avoids the local Visual Studio C++ toolchain requirement during release builds.
+  - The logout path keeps its existing Edge cookie cleanup behavior.
+
 ## [1.3.40] - 2026-04-02
 
 ### Changed

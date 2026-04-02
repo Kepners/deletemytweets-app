@@ -20,8 +20,8 @@ Available as both a **Desktop GUI App** (Electron) and a **CLI tool**.
 ### Desktop App (Recommended)
 
 Download from the [Releases](https://github.com/Kepners/deletemytweets/releases) page:
-- **Portable**: `Delete My Tweets 1.3.40.exe` - No installation needed, just run
-- **Installer**: `Delete My Tweets Setup 1.3.40.exe` - Traditional Windows installer
+- **Portable**: `Delete My Tweets 1.3.41.exe` - No installation needed, just run
+- **Installer**: `Delete My Tweets Setup 1.3.41.exe` - Traditional Windows installer
 
 ### From Source
 
@@ -78,8 +78,8 @@ npm start
 npm run build
 
 # Output in dist/ folder:
-# - Delete My Tweets 1.3.40.exe (portable)
-# - Delete My Tweets Setup 1.3.40.exe (installer)
+# - Delete My Tweets 1.3.41.exe (portable)
+# - Delete My Tweets Setup 1.3.41.exe (installer)
 ```
 
 ## Configuration
@@ -204,8 +204,8 @@ deletemytweets/
 ├── START_APP.bat      # Windows launcher script
 ├── icon.ico           # App icon
 └── dist/              # Built executables (after npm run build)
-    ├── Delete My Tweets 1.3.40.exe        # Portable executable
-    └── Delete My Tweets Setup 1.3.40.exe  # Windows installer
+    ├── Delete My Tweets 1.3.41.exe        # Portable executable
+    └── Delete My Tweets Setup 1.3.41.exe  # Windows installer
 ```
 
 ## Tech Stack
