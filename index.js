@@ -127,10 +127,10 @@ function printHeader() {
 
 function printConfig(config) {
   if (!IS_CLI) return;
-  const { handle, target, deleteMonth, deleteYear, protectMonth, protectYear, posts, replies, reposts, speed } = config;
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const deleteDate = `${months[deleteMonth - 1]} ${deleteYear}`;
-  const protectDate = `${months[protectMonth - 1]} ${protectYear}`;
+  const { handle, target, posts, replies, reposts, speed } = config;
+  const bounds = resolveDateBounds(config);
+  const deleteDate = formatDate(bounds.deleteBefore);
+  const protectDate = formatDate(bounds.protectAfter);
   const speedLabel = speed === 'aggressive' ? 'Aggressive' : speed === 'conservative' ? 'Conservative' : 'Normal';
 
   const configBox = boxen(
@@ -138,6 +138,7 @@ function printConfig(config) {
     chalk.gray('  ─────────────────────────────────\n') +
     `  ${chalk.cyan('Profile')}       ${chalk.white('@' + chalk.bold(handle))}\n` +
     `  ${chalk.cyan('Target')}        ${chalk.bold.white(target)} tweets\n` +
+    `  ${chalk.cyan('Mode')}          ${chalk.white(describeDateBounds(config))}\n` +
     `  ${chalk.red('Delete')}        Before ${deleteDate}\n` +
     `  ${chalk.green('Protect')}       After ${protectDate}\n` +
     `  ${chalk.cyan('Speed')}         ${speedLabel}\n` +
@@ -272,12 +273,108 @@ function stopProgress() {
 const CONFIG_FILE = path.resolve(__dirname, "deletemytweets_config.json");
 const SESSION_EXPIRY_MS = 90 * 24 * 60 * 60 * 1000; // 90 days (long sessions for all-day runs)
 const HANDLE_PATTERN = /^[A-Za-z0-9_]{1,15}$/;
+const ARCHIVE_START = new Date(2006, 0, 1);
 
 function normalizeHandle(rawHandle) {
   if (typeof rawHandle !== "string") return null;
   const trimmed = rawHandle.trim().replace(/^@+/, "");
   if (!HANDLE_PATTERN.test(trimmed)) return null;
   return trimmed.toLowerCase();
+}
+
+function toPositiveInt(value, fallback) {
+  const parsed = parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function toBoolean(value, fallback = false) {
+  if (value === true || value === false) return value;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true") return true;
+    if (normalized === "false") return false;
+  }
+  return fallback;
+}
+
+function normalizeSelectionMode(rawMode) {
+  const mode = typeof rawMode === "string" ? rawMode.trim().toLowerCase() : "";
+  if (
+    mode === "protect" ||
+    mode === "keep" ||
+    mode === "keep_recent" ||
+    mode === "keep-recent" ||
+    mode === "rolling-keep"
+  ) {
+    return "protect";
+  }
+  if (
+    mode === "delete" ||
+    mode === "delete_recent" ||
+    mode === "delete-recent" ||
+    mode === "rolling-delete"
+  ) {
+    return "delete";
+  }
+  return "delete";
+}
+
+function startOfMonth(date = new Date()) {
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+}
+
+function shiftMonths(date, deltaMonths) {
+  return new Date(date.getFullYear(), date.getMonth() + deltaMonths, 1);
+}
+
+function resolveDateBounds(options = {}) {
+  const sliderMode = normalizeSelectionMode(options.sliderMode ?? SLIDER_MODE);
+  const rollingWindow = toBoolean(options.rollingWindow ?? ROLLING_WINDOW);
+  const rollingMonths = toPositiveInt(options.rollingMonths ?? ROLLING_MONTHS, 3);
+  const deleteMonth = toPositiveInt(options.deleteMonth ?? DELETE_MONTH, 12);
+  const deleteYear = toPositiveInt(options.deleteYear ?? DELETE_YEAR, 2014);
+  const protectMonth = toPositiveInt(options.protectMonth ?? PROTECT_MONTH, 1);
+  const protectYear = toPositiveInt(options.protectYear ?? PROTECT_YEAR, new Date().getFullYear());
+
+  if (rollingWindow) {
+    const windowEnd = startOfMonth(options.now || new Date());
+    const windowStart = shiftMonths(windowEnd, -rollingMonths);
+    return {
+      sliderMode,
+      rollingWindow: true,
+      rollingMonths,
+      deleteBefore: sliderMode === "protect" ? ARCHIVE_START : windowStart,
+      protectAfter: sliderMode === "protect" ? windowStart : windowEnd
+    };
+  }
+
+  return {
+    sliderMode,
+    rollingWindow: false,
+    rollingMonths,
+    deleteBefore: sliderMode === "protect"
+      ? ARCHIVE_START
+      : new Date(deleteYear, deleteMonth - 1, 1),
+    protectAfter: new Date(protectYear, protectMonth - 1, 1)
+  };
+}
+
+function describeDateBounds(options = {}) {
+  const bounds = resolveDateBounds(options);
+  const { sliderMode, rollingWindow, rollingMonths, deleteBefore, protectAfter } = bounds;
+
+  if (rollingWindow) {
+    if (sliderMode === "protect") {
+      return `Rolling keep recent ${rollingMonths} month${rollingMonths === 1 ? "" : "s"} from ${formatDate(protectAfter)} onward`;
+    }
+    return `Rolling delete recent ${rollingMonths} month${rollingMonths === 1 ? "" : "s"} (${formatDate(deleteBefore)} → ${formatDate(protectAfter)})`;
+  }
+
+  if (sliderMode === "protect") {
+    return `Keep after ${formatDate(protectAfter)}`
+  }
+
+  return `Delete from ${formatDate(deleteBefore)} to ${formatDate(protectAfter)}`;
 }
 
 function loadConfig() {
@@ -427,15 +524,19 @@ let SCROLL_MIN_WAIT_MS = 200;
 let SCROLL_MAX_WAIT_MS = 400;
 let SCROLL_STEP_RATIO = 0.92;
 let RETURN_TO_TOP = false;
+let SLIDER_MODE = "delete";
+let ROLLING_WINDOW = false;
+let ROLLING_MONTHS = 3;
 let DELETE_MONTH = 12;
 let DELETE_YEAR = 2014;
-let PROTECT_MONTH = 1;
-let PROTECT_YEAR = 2025;
+let PROTECT_MONTH = new Date().getMonth() + 1;
+let PROTECT_YEAR = new Date().getFullYear();
 let DELETE_BEFORE = null;
 let PROTECT_AFTER = null;
 
 // Parse config from environment (CLI mode only)
 function parseEnvConfig() {
+  const now = new Date();
   // Support DMT_* env vars from Electron app, plus legacy names
   const rawHandle = process.env.DMT_HANDLE || process.env.PROFILE_HANDLE || process.argv[2] || savedConfig.handle;
   PROFILE_HANDLE = normalizeHandle(rawHandle);
@@ -501,11 +602,24 @@ function parseEnvConfig() {
 
   DELETE_MONTH = parseInt(process.env.DMT_DELETE_MONTH ?? process.env.DELETE_MONTH ?? "12", 10);
   DELETE_YEAR = parseInt(process.env.DMT_DELETE_YEAR ?? process.env.DELETE_YEAR ?? process.env.DELETE_YEAR_AND_OLDER ?? "2014", 10);
-  PROTECT_MONTH = parseInt(process.env.DMT_PROTECT_MONTH ?? process.env.PROTECT_MONTH ?? "01", 10);
-  PROTECT_YEAR = parseInt(process.env.DMT_PROTECT_YEAR ?? process.env.PROTECT_YEAR ?? process.env.PROTECT_YEAR_AND_NEWER ?? "2025", 10);
+  PROTECT_MONTH = parseInt(process.env.DMT_PROTECT_MONTH ?? process.env.PROTECT_MONTH ?? String(now.getMonth() + 1), 10);
+  PROTECT_YEAR = parseInt(process.env.DMT_PROTECT_YEAR ?? process.env.PROTECT_YEAR ?? process.env.PROTECT_YEAR_AND_NEWER ?? String(now.getFullYear()), 10);
+  SLIDER_MODE = normalizeSelectionMode(process.env.DMT_SLIDER_MODE ?? process.env.SLIDER_MODE ?? "delete");
+  ROLLING_WINDOW = toBoolean(process.env.DMT_ROLLING_WINDOW ?? process.env.ROLLING_WINDOW ?? false);
+  ROLLING_MONTHS = toPositiveInt(process.env.DMT_ROLLING_MONTHS ?? process.env.ROLLING_MONTHS ?? "3", 3);
 
-  DELETE_BEFORE = new Date(DELETE_YEAR, DELETE_MONTH - 1, 1);
-  PROTECT_AFTER = new Date(PROTECT_YEAR, PROTECT_MONTH - 1, 1);
+  const bounds = resolveDateBounds({
+    sliderMode: SLIDER_MODE,
+    rollingWindow: ROLLING_WINDOW,
+    rollingMonths: ROLLING_MONTHS,
+    deleteMonth: DELETE_MONTH,
+    deleteYear: DELETE_YEAR,
+    protectMonth: PROTECT_MONTH,
+    protectYear: PROTECT_YEAR,
+    now
+  });
+  DELETE_BEFORE = bounds.deleteBefore;
+  PROTECT_AFTER = bounds.protectAfter;
 }
 
 
@@ -1534,7 +1648,15 @@ async function collectWorklist(page, want, seen, retryState, seenEver) {
 async function processTab(page, tabName, removed, startTime) {
   console.log("");
   log("tab", chalk.magenta.bold(`Processing ${tabName}`));
-  log("info", `DELETE from ${formatDate(DELETE_BEFORE)} to ${formatDate(PROTECT_AFTER)}, PROTECT after ${formatDate(PROTECT_AFTER)}`);
+  log("info", describeDateBounds({
+    sliderMode: SLIDER_MODE,
+    rollingWindow: ROLLING_WINDOW,
+    rollingMonths: ROLLING_MONTHS,
+    deleteMonth: DELETE_MONTH,
+    deleteYear: DELETE_YEAR,
+    protectMonth: PROTECT_MONTH,
+    protectYear: PROTECT_YEAR
+  }));
 
   await gotoProfileTab(page, tabName);
 
@@ -1756,6 +1878,9 @@ async function run() {
   printConfig({
     handle: PROFILE_HANDLE,
     target: TARGET,
+    sliderMode: SLIDER_MODE,
+    rollingWindow: ROLLING_WINDOW,
+    rollingMonths: ROLLING_MONTHS,
     deleteMonth: DELETE_MONTH,
     deleteYear: DELETE_YEAR,
     protectMonth: PROTECT_MONTH,
@@ -2017,6 +2142,7 @@ async function waitForExit(message = 'Press Enter to exit...') {
  * @param {Function} callbacks.onComplete - Complete callback: ({deleted, target, elapsed}) => void
  */
 async function runCleanup(config, callbacks = {}) {
+  const now = new Date();
   // Set callbacks
   onProgressCallback = callbacks.onProgress || null;
   onLogCallback = callbacks.onLog || null;
@@ -2029,8 +2155,8 @@ async function runCleanup(config, callbacks = {}) {
   TARGET = config.target || 10000;
   DELETE_MONTH = config.deleteMonth || 12;
   DELETE_YEAR = config.deleteYear || 2014;
-  PROTECT_MONTH = config.protectMonth || 1;
-  PROTECT_YEAR = config.protectYear || 2025;
+  PROTECT_MONTH = config.protectMonth || (now.getMonth() + 1);
+  PROTECT_YEAR = config.protectYear || now.getFullYear();
   INCLUDE_POSTS = config.posts !== false;
   INCLUDE_REPLIES = config.replies !== false;
   HANDLE_REPOSTS = config.reposts === true;
@@ -2039,6 +2165,9 @@ async function runCleanup(config, callbacks = {}) {
   PRIVATE_MODE = config.privateMode === true; // Use fresh browser instead of Edge profile
   USE_FIREFOX = config.useFirefox === true;
   PROXY_SERVER = normalizeProxy(config.proxy);
+  SLIDER_MODE = normalizeSelectionMode(config.sliderMode ?? "delete");
+  ROLLING_WINDOW = toBoolean(config.rollingWindow);
+  ROLLING_MONTHS = toPositiveInt(config.rollingMonths, 3);
 
   // Set delays based on speed
   const delays = SPEED_PRESETS[SPEED] || SPEED_PRESETS.normal;
@@ -2051,8 +2180,18 @@ async function runCleanup(config, callbacks = {}) {
   });
 
   // Set date boundaries
-  DELETE_BEFORE = new Date(DELETE_YEAR, DELETE_MONTH - 1, 1);
-  PROTECT_AFTER = new Date(PROTECT_YEAR, PROTECT_MONTH - 1, 1);
+  const bounds = resolveDateBounds({
+    sliderMode: SLIDER_MODE,
+    rollingWindow: ROLLING_WINDOW,
+    rollingMonths: ROLLING_MONTHS,
+    deleteMonth: DELETE_MONTH,
+    deleteYear: DELETE_YEAR,
+    protectMonth: PROTECT_MONTH,
+    protectYear: PROTECT_YEAR,
+    now
+  });
+  DELETE_BEFORE = bounds.deleteBefore;
+  PROTECT_AFTER = bounds.protectAfter;
 
   // Create fresh abort controller for this run
   abortController = new AbortController();

@@ -20,8 +20,8 @@ Available as both a **Desktop GUI App** (Electron) and a **CLI tool**.
 ### Desktop App (Recommended)
 
 Download from the [Releases](https://github.com/Kepners/deletemytweets/releases) page:
-- **Portable**: `Delete My Tweets 1.1.0.exe` - No installation needed, just run
-- **Installer**: `Delete My Tweets Setup 1.1.0.exe` - Traditional Windows installer
+- **Portable**: `Delete My Tweets 1.3.39.exe` - No installation needed, just run
+- **Installer**: `Delete My Tweets Setup 1.3.39.exe` - Traditional Windows installer
 
 ### From Source
 
@@ -42,6 +42,7 @@ npx playwright install chromium
    - Select content types (Posts, Replies, Reposts)
    - Set "Delete Before" date (month + year)
    - Set "Protect After" date (month + year)
+   - Optional: enable "Rolling window" to make the range follow the current month
    - Set target count
    - Toggle "Show browser window" for faster deletion + live view
 4. **Start**: Click "Start Cleanup"
@@ -58,6 +59,10 @@ PROFILE_HANDLE=yourusername node index.js
 
 # With custom settings
 PROFILE_HANDLE=yourusername TARGET=100 DELETE_YEAR_AND_OLDER=2020 node index.js
+
+# Rolling window examples
+ROLLING_WINDOW=true ROLLING_MONTHS=3 SLIDER_MODE=delete HANDLE_REPOSTS=true node index.js yourusername
+ROLLING_WINDOW=true ROLLING_MONTHS=3 SLIDER_MODE=protect HANDLE_REPOSTS=true node index.js yourusername
 ```
 
 ## Building from Source
@@ -73,8 +78,8 @@ npm start
 npm run build
 
 # Output in dist/ folder:
-# - Delete My Tweets 1.1.0.exe (portable)
-# - Delete My Tweets Setup 1.1.0.exe (installer)
+# - Delete My Tweets 1.3.39.exe (portable)
+# - Delete My Tweets Setup 1.3.39.exe (installer)
 ```
 
 ## Configuration
@@ -86,6 +91,8 @@ npm run build
 | **Content Types** | Checkboxes to include Posts, Replies, and/or Reposts |
 | **Delete Before** | Month and year threshold - delete tweets older than this |
 | **Protect After** | Month and year threshold - never delete tweets newer than this |
+| **Rolling window** | When enabled, the selected range follows the current month automatically |
+| **Months** | Rolling window length in calendar months |
 | **Target Count** | Maximum number of tweets to delete per run |
 | **Speed** | Aggressive (fast, 0.6-1s delays), Normal (1.2-2.2s), or Conservative (2.5-4s) |
 | **Show browser window** | Toggle visible browser (faster + watch deletions live) |
@@ -102,10 +109,13 @@ npm run build
 |----------|---------|-------------|
 | `DELETE_MONTH` | `12` | Delete tweets before this month (1-12) |
 | `DELETE_YEAR` | `2014` | Delete tweets before this year |
-| `PROTECT_MONTH` | `01` | Protect tweets after this month (1-12) |
-| `PROTECT_YEAR` | `2025` | Protect tweets from this year and newer |
+| `PROTECT_MONTH` | `current month` | Protect tweets after this month (1-12) |
+| `PROTECT_YEAR` | `current year` | Protect tweets from this year and newer |
 | `DELETE_YEAR_AND_OLDER` | `2014` | (Legacy) Delete tweets from this year and older |
-| `PROTECT_YEAR_AND_NEWER` | `2025` | (Legacy) Never delete tweets from this year and newer |
+| `PROTECT_YEAR_AND_NEWER` | `current year` | (Legacy) Never delete tweets from this year and newer |
+| `SLIDER_MODE` | `delete` | `delete` to delete the selected window, `protect` to keep it and delete older tweets |
+| `ROLLING_WINDOW` | `false` | When `true`, treat the selected window as relative to the current month |
+| `ROLLING_MONTHS` | `3` | Rolling window size in months |
 
 #### Behavior
 | Variable | Default | Description |
@@ -141,6 +151,16 @@ DELETE_YEAR_AND_OLDER=2020 PROTECT_YEAR_AND_NEWER=2024 node index.js myhandle
 ### Delete only replies, protect everything from 2023+
 ```bash
 INCLUDE_POSTS=false INCLUDE_REPLIES=true DELETE_YEAR_AND_OLDER=2022 PROTECT_YEAR_AND_NEWER=2023 node index.js myhandle
+```
+
+### Delete the last 3 months of reposts, keep older tweets
+```bash
+ROLLING_WINDOW=true ROLLING_MONTHS=3 SLIDER_MODE=delete HANDLE_REPOSTS=true node index.js myhandle
+```
+
+### Keep the last 3 months, delete everything older
+```bash
+ROLLING_WINDOW=true ROLLING_MONTHS=3 SLIDER_MODE=protect HANDLE_REPOSTS=true node index.js myhandle
 ```
 
 ### Run in headless mode (no visible browser)
@@ -182,8 +202,8 @@ deletemytweets/
 ├── START_APP.bat      # Windows launcher script
 ├── icon.ico           # App icon
 └── dist/              # Built executables (after npm run build)
-    ├── Delete My Tweets 1.1.0.exe        # Portable executable
-    └── Delete My Tweets Setup 1.1.0.exe  # Windows installer
+    ├── Delete My Tweets 1.3.39.exe        # Portable executable
+    └── Delete My Tweets Setup 1.3.39.exe  # Windows installer
 ```
 
 ## Tech Stack

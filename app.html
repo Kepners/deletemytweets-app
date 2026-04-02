@@ -852,6 +852,13 @@
     /* Timeline Slider */
     .timeline-container {
       padding: 16px 12px 8px;
+      transition: opacity 0.2s ease, filter 0.2s ease;
+    }
+
+    .timeline-container.locked {
+      opacity: 0.45;
+      filter: saturate(0.65);
+      pointer-events: none;
     }
 
     .timeline-track {
@@ -1061,13 +1068,23 @@
             </div>
           </div>
 
+          <div class="card-row">
+            <span class="card-label">Rolling window</span>
+            <div class="toggle" data-setting="rollingWindow"></div>
+          </div>
+
+          <div class="card-row" id="rollingMonthsRow" style="display:none;">
+            <span class="card-label">Months</span>
+            <input type="number" class="num-input" id="rollingMonths" value="3" min="1" max="120">
+          </div>
+
           <!-- Current Selection Display -->
           <div class="date-display" id="dateDisplay">
             Dec 2014 → Jan 2026
           </div>
 
           <!-- Timeline Slider -->
-          <div class="timeline-container">
+          <div class="timeline-container" id="timelineContainer">
             <div class="timeline-track" id="timelineTrack">
               <div class="timeline-selection" id="timelineSelection"></div>
               <div class="timeline-handle" id="handleStart"></div>
@@ -1358,6 +1375,9 @@
       deleteMonth: 12, deleteYear: 2014,
       protectMonth: new Date().getMonth() + 1, // Current month (1-12)
       protectYear: new Date().getFullYear(),
+      sliderMode: 'delete',
+      rollingWindow: false,
+      rollingMonths: 3,
       useFirefox: true,
       proxy: '',
       privateMode: false  // Use private/fresh browser instead of Edge profile
@@ -1752,6 +1772,7 @@
         if (s === 'reposts') config.reposts = t.classList.contains('on');
         if (s === 'showBrowser') config.headless = !t.classList.contains('on');
         if (s === 'privateMode') config.privateMode = t.classList.contains('on');
+        if (s === 'rollingWindow') config.rollingWindow = t.classList.contains('on');
         if (s === 'useFirefox') {
           config.useFirefox = t.classList.contains('on');
           // Show/hide Firefox options (proxy, etc.)
@@ -1766,6 +1787,9 @@
             firefoxOpts.style.opacity = '0';
             firefoxRow.style.borderBottom = 'none';
           }
+        }
+        if (s === 'rollingWindow') {
+          refreshDateRangeUI();
         }
         // Save settings
         api.saveConfig( config);
@@ -1809,6 +1833,14 @@
       });
     });
 
+    document.getElementById('rollingMonths').addEventListener('input', (e) => {
+      config.rollingMonths = Math.max(1, parseInt(e.target.value, 10) || 3);
+      if (config.rollingWindow) {
+        refreshDateRangeUI();
+      }
+      api.saveConfig(config);
+    });
+
     // ==================== TIMELINE SLIDER ====================
     const TIMELINE_START_YEAR = 2006; // Twitter's birth
     const TIMELINE_END_YEAR = new Date().getFullYear();
@@ -1846,14 +1878,49 @@
       return `${monthNames[month - 1]} ${year}`;
     }
 
+    function getRollingMonths() {
+      const parsed = parseInt(document.getElementById('rollingMonths').value, 10);
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : 3;
+    }
+
+    function getCurrentMonthParts() {
+      const now = new Date();
+      return { year: now.getFullYear(), month: now.getMonth() + 1 };
+    }
+
+    function addMonthsToParts(parts, deltaMonths) {
+      const date = new Date(parts.year, parts.month - 1, 1);
+      date.setMonth(date.getMonth() + deltaMonths);
+      return { year: date.getFullYear(), month: date.getMonth() + 1 };
+    }
+
+    function getRollingRange(months) {
+      const end = getCurrentMonthParts();
+      const start = addMonthsToParts(end, -months);
+      return { start, end };
+    }
+
+    function getActiveRange() {
+      if (config.rollingWindow) {
+        return getRollingRange(getRollingMonths());
+      }
+      return { start: sliderStart, end: sliderEnd };
+    }
+
     function updateSliderUI() {
-      const startPercent = monthsToPercent(sliderStart.year, sliderStart.month);
-      const endPercent = monthsToPercent(sliderEnd.year, sliderEnd.month);
+      const rollingActive = !!config.rollingWindow;
+      const range = getActiveRange();
+      const rollingMonths = getRollingMonths();
+      const startPercent = monthsToPercent(range.start.year, range.start.month);
+      const endPercent = monthsToPercent(range.end.year, range.end.month);
 
       selection.style.left = `${startPercent}%`;
-      selection.style.width = `${endPercent - startPercent}%`;
+      selection.style.width = `${Math.max(0, endPercent - startPercent)}%`;
       handleStart.style.left = `${startPercent}%`;
       handleEnd.style.left = `${endPercent}%`;
+
+      document.getElementById('rollingMonthsRow').style.display = rollingActive ? 'flex' : 'none';
+      document.getElementById('timelineContainer').classList.toggle('locked', rollingActive);
 
       // Update mode styling
       if (sliderMode === 'protect') {
@@ -1863,9 +1930,44 @@
       }
 
       // Update display
-      const startStr = formatMonth(sliderStart.year, sliderStart.month);
-      const endStr = formatMonth(sliderEnd.year, sliderEnd.month);
+      const startStr = formatMonth(range.start.year, range.start.month);
+      const endStr = formatMonth(range.end.year, range.end.month);
+      if (rollingActive) {
+        const windowLabel = rollingMonths === 1 ? '1 month' : `${rollingMonths} months`;
+        dateDisplay.textContent = sliderMode === 'delete'
+          ? `Rolling delete: last ${windowLabel} (${startStr} -> ${endStr})`
+          : `Rolling keep: last ${windowLabel} (${startStr} -> ${endStr})`;
+
+        if (sliderMode === 'delete') {
+          deleteSummary.textContent = `Delete recent ${windowLabel}: ${startStr} -> ${endStr}`;
+          protectSummary.textContent = `Keep: Before ${startStr}, After ${endStr}`;
+        } else {
+          deleteSummary.textContent = `Delete: Before ${startStr}`;
+          protectSummary.textContent = `Keep recent ${windowLabel}`;
+        }
+
+        syncToConfig(range);
+        return;
+      }
       dateDisplay.textContent = `${startStr} → ${endStr}`;
+
+      if (rollingActive) {
+        const windowLabel = rollingMonths === 1 ? '1 month' : `${rollingMonths} months`;
+        dateDisplay.textContent = sliderMode === 'delete'
+          ? `Rolling delete: last ${windowLabel} (${startStr} â†’ ${endStr})`
+          : `Rolling keep: last ${windowLabel} (${startStr} â†’ ${endStr})`;
+
+        if (sliderMode === 'delete') {
+          deleteSummary.textContent = `Delete recent ${windowLabel}: ${startStr} â†’ ${endStr}`;
+          protectSummary.textContent = `Keep: Before ${startStr}, After ${endStr}`;
+        } else {
+          deleteSummary.textContent = `Delete: Before ${startStr}`;
+          protectSummary.textContent = `Keep recent ${windowLabel}`;
+        }
+
+        syncToConfig(range);
+        return;
+      }
 
       // Update summary based on mode
       if (sliderMode === 'delete') {
@@ -1880,32 +1982,38 @@
       syncToConfig();
     }
 
-    function syncToConfig() {
+    function syncToConfig(range = getActiveRange()) {
+      config.sliderMode = sliderMode;
+      if (config.rollingWindow) {
+        config.rollingMonths = getRollingMonths();
+        api.saveConfig(config);
+        return;
+      }
+
       if (sliderMode === 'delete') {
         // Delete selected range: deleteFrom = start, protectAfter = end
-        document.getElementById('deleteMonth').value = sliderStart.month;
-        document.getElementById('deleteYear').value = sliderStart.year;
-        document.getElementById('protectMonth').value = sliderEnd.month;
-        document.getElementById('protectYear').value = sliderEnd.year;
-        config.deleteMonth = sliderStart.month;
-        config.deleteYear = sliderStart.year;
-        config.protectMonth = sliderEnd.month;
-        config.protectYear = sliderEnd.year;
+        document.getElementById('deleteMonth').value = range.start.month;
+        document.getElementById('deleteYear').value = range.start.year;
+        document.getElementById('protectMonth').value = range.end.month;
+        document.getElementById('protectYear').value = range.end.year;
+        config.deleteMonth = range.start.month;
+        config.deleteYear = range.start.year;
+        config.protectMonth = range.end.month;
+        config.protectYear = range.end.year;
       } else {
         // Protect selected range (invert): delete everything OUTSIDE the range
         // This needs different logic - for now just swap the meaning
         document.getElementById('deleteMonth').value = 1;
         document.getElementById('deleteYear').value = 2006;
-        document.getElementById('protectMonth').value = sliderStart.month;
-        document.getElementById('protectYear').value = sliderStart.year;
+        document.getElementById('protectMonth').value = range.start.month;
+        document.getElementById('protectYear').value = range.start.year;
         config.deleteMonth = 1;
         config.deleteYear = 2006;
-        config.protectMonth = sliderStart.month;
-        config.protectYear = sliderStart.year;
+        config.protectMonth = range.start.month;
+        config.protectYear = range.start.year;
         // Note: protect mode would keep ONLY the selected range
         // This would require additional logic changes in index.js
       }
-      config.sliderMode = sliderMode;
       api.saveConfig(config);
     }
 
@@ -1924,6 +2032,7 @@
     handleEnd.addEventListener('touchstart', (e) => { activeHandle = 'end'; });
 
     document.addEventListener('mousemove', (e) => {
+      if (config.rollingWindow) return;
       if (!activeHandle) return;
       const percent = getPercentFromEvent(e);
       const date = percentToDate(percent);
@@ -1944,6 +2053,7 @@
     });
 
     document.addEventListener('touchmove', (e) => {
+      if (config.rollingWindow) return;
       if (!activeHandle) return;
       const percent = getPercentFromEvent(e);
       const date = percentToDate(percent);
@@ -1968,6 +2078,7 @@
 
     // Click on track to move nearest handle
     track.addEventListener('click', (e) => {
+      if (config.rollingWindow) return;
       if (e.target === handleStart || e.target === handleEnd) return;
       const percent = getPercentFromEvent(e);
       const startPercent = monthsToPercent(sliderStart.year, sliderStart.month);
@@ -1992,11 +2103,9 @@
     });
 
     document.getElementById('modeProtect').addEventListener('click', () => {
-      // Protect mode is not implemented in cleanup engine yet.
-      sliderMode = 'delete';
-      document.getElementById('modeDelete').classList.add('active');
-      document.getElementById('modeProtect').classList.remove('active', 'protect');
-      showNotification('Protect mode is not available yet. Using Delete mode.', 'warn');
+      sliderMode = 'protect';
+      document.getElementById('modeProtect').classList.add('active', 'protect');
+      document.getElementById('modeDelete').classList.remove('active');
       updateSliderUI();
     });
 
@@ -2012,6 +2121,7 @@
     }
 
     track.addEventListener('wheel', (e) => {
+      if (config.rollingWindow) return;
       e.preventDefault();
       const percent = getPercentFromEvent(e);
       const startPercent = monthsToPercent(sliderStart.year, sliderStart.month);
@@ -2043,6 +2153,7 @@
 
     // Show which handle will be affected on hover
     track.addEventListener('mousemove', (e) => {
+      if (config.rollingWindow) return;
       if (activeHandle) return; // Don't change cursor while dragging
       const percent = getPercentFromEvent(e);
       const startPercent = monthsToPercent(sliderStart.year, sliderStart.month);
@@ -2300,6 +2411,9 @@
       config.deleteYear = parseInt(document.getElementById('deleteYear').value);
       config.protectMonth = parseInt(document.getElementById('protectMonth').value);
       config.protectYear = parseInt(document.getElementById('protectYear').value);
+      config.sliderMode = sliderMode;
+      config.rollingWindow = document.querySelector('[data-setting="rollingWindow"]').classList.contains('on');
+      config.rollingMonths = Math.max(1, parseInt(document.getElementById('rollingMonths').value, 10) || 3);
       config.useFirefox = document.querySelector('[data-setting="useFirefox"]').classList.contains('on');
       config.proxy = document.getElementById('proxyInput').value.trim() || null;
 
@@ -2508,6 +2622,14 @@
           config.protectYear = c.protectYear;
           document.getElementById('protectYear').value = c.protectYear;
         }
+        if (c.rollingWindow !== undefined) {
+          config.rollingWindow = c.rollingWindow;
+          document.querySelector('[data-setting="rollingWindow"]').classList.toggle('on', c.rollingWindow);
+        }
+        if (c.rollingMonths) {
+          config.rollingMonths = c.rollingMonths;
+          document.getElementById('rollingMonths').value = c.rollingMonths;
+        }
 
         // Restore slider state
         if (c.deleteYear && c.deleteMonth) {
@@ -2517,7 +2639,7 @@
           sliderEnd = { year: c.protectYear, month: c.protectMonth };
         }
         if (c.sliderMode) {
-          sliderMode = c.sliderMode === 'protect' ? 'delete' : c.sliderMode;
+          sliderMode = c.sliderMode === 'protect' ? 'protect' : 'delete';
         }
         document.getElementById('modeDelete').classList.toggle('active', sliderMode === 'delete');
         document.getElementById('modeProtect').classList.toggle('active', sliderMode === 'protect');

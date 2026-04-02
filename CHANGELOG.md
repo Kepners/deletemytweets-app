@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.3.39] - 2026-04-02
+
+### Fixed
+- **Rolling date windows** now follow the current month at runtime.
+  - Added rolling window support for "delete recent N months" and "keep recent N months".
+  - Wired selection mode through the Electron bridge so the GUI and CLI stay in sync.
+- **Protect mode** now works in the GUI instead of falling back to delete mode.
+- **Stale protect defaults** no longer hard-code an old year for new runs.
+
 ## [1.3.38] - 2026-02-27
 
 ### Fixed
