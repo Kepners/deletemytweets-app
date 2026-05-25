@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [1.3.42] - 2026-05-25
 
 ### Fixed
 - **Rolling delete windows now include the current month.**
