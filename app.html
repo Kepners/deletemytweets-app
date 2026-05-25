@@ -1912,7 +1912,8 @@
 
     function getRollingRange(months) {
       const end = getCurrentMonthParts();
-      const start = addMonthsToParts(end, -months);
+      const windowMonths = Math.max(1, months || 1);
+      const start = addMonthsToParts(end, -(windowMonths - 1));
       return { start, end };
     }
 

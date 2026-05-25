@@ -337,14 +337,15 @@ function resolveDateBounds(options = {}) {
   const protectYear = toPositiveInt(options.protectYear ?? PROTECT_YEAR, new Date().getFullYear());
 
   if (rollingWindow) {
-    const windowEnd = startOfMonth(options.now || new Date());
-    const windowStart = shiftMonths(windowEnd, -rollingMonths);
+    const currentMonth = startOfMonth(options.now || new Date());
+    const windowStart = shiftMonths(currentMonth, -(rollingMonths - 1));
+    const windowEndExclusive = shiftMonths(currentMonth, 1);
     return {
       sliderMode,
       rollingWindow: true,
       rollingMonths,
       deleteBefore: sliderMode === "protect" ? ARCHIVE_START : windowStart,
-      protectAfter: sliderMode === "protect" ? windowStart : windowEnd
+      protectAfter: sliderMode === "protect" ? windowStart : windowEndExclusive
     };
   }
 
@@ -364,10 +365,14 @@ function describeDateBounds(options = {}) {
   const { sliderMode, rollingWindow, rollingMonths, deleteBefore, protectAfter } = bounds;
 
   if (rollingWindow) {
+    const displayStart = sliderMode === "protect" ? protectAfter : deleteBefore;
+    const displayEnd = sliderMode === "protect"
+      ? shiftMonths(protectAfter, rollingMonths - 1)
+      : shiftMonths(protectAfter, -1);
     if (sliderMode === "protect") {
-      return `Rolling keep recent ${rollingMonths} month${rollingMonths === 1 ? "" : "s"} from ${formatDate(protectAfter)} onward`;
+      return `Rolling keep recent ${rollingMonths} month${rollingMonths === 1 ? "" : "s"} (${formatDate(displayStart)} → ${formatDate(displayEnd)})`;
     }
-    return `Rolling delete recent ${rollingMonths} month${rollingMonths === 1 ? "" : "s"} (${formatDate(deleteBefore)} → ${formatDate(protectAfter)})`;
+    return `Rolling delete recent ${rollingMonths} month${rollingMonths === 1 ? "" : "s"} (${formatDate(displayStart)} → ${formatDate(displayEnd)})`;
   }
 
   if (sliderMode === "protect") {

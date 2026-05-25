@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- **Rolling delete windows now include the current month.**
+  - Selecting "delete recent N months" no longer protects current-month posts by mistake.
+  - The desktop timeline label now matches the months the cleanup engine targets.
+
 ## [1.3.41] - 2026-04-02
 
 ### Fixed
