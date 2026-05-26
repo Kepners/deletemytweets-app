@@ -271,7 +271,7 @@ function stopProgress() {
 
 // ================= CONFIG FILE =================
 const CONFIG_FILE = path.resolve(__dirname, "deletemytweets_config.json");
-const SESSION_EXPIRY_MS = 90 * 24 * 60 * 60 * 1000; // 90 days (long sessions for all-day runs)
+const SESSION_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24 hours
 const HANDLE_PATTERN = /^[A-Za-z0-9_]{1,15}$/;
 const ARCHIVE_START = new Date(2006, 0, 1);
 

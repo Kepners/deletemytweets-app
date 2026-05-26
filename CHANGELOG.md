@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.3.43] - 2026-05-26
+
+### Fixed
+- **Login now verifies the actual X account before saving a session.**
+  - The desktop Login button no longer treats any existing X `auth_token` cookie as proof for the typed handle.
+  - If the browser is already signed in to a different X account, the app reports that mismatch instead of saving a mislabeled session.
+- **Session status now honors the documented 24-hour expiry.**
+  - Expired session files are cleared when the GUI checks account status.
+  - GUI cleanup now requires a verified per-handle login marker instead of trusting older unverified cookie files.
+  - The cleanup engine now matches the README's daily re-login behavior.
+
 ## [1.3.42] - 2026-05-25
 
 ### Fixed

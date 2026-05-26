@@ -20,8 +20,8 @@ Available as both a **Desktop GUI App** (Electron) and a **CLI tool**.
 ### Desktop App (Recommended)
 
 Download from the [Releases](https://github.com/Kepners/deletemytweets/releases) page:
-- **Portable**: `Delete My Tweets 1.3.42.exe` - No installation needed, just run
-- **Installer**: `Delete My Tweets Setup 1.3.42.exe` - Traditional Windows installer
+- **Portable**: `Delete My Tweets 1.3.43.exe` - No installation needed, just run
+- **Installer**: `Delete My Tweets Setup 1.3.43.exe` - Traditional Windows installer
 
 ### From Source
 
@@ -45,8 +45,8 @@ npx playwright install chromium
    - Rolling window is enabled by default in the desktop app on new installs, so the range follows the current month automatically
    - Set target count
    - Toggle "Show browser window" for faster deletion + live view
-4. **Start**: Click "Start Cleanup"
-5. **Login**: If needed, log in to X in the browser window that opens
+4. **Login**: Click "Login" and verify the X account matches the handle
+5. **Start**: Click "Start Cleanup"
 
 ### CLI
 
@@ -78,8 +78,8 @@ npm start
 npm run build
 
 # Output in dist/ folder:
-# - Delete My Tweets 1.3.42.exe (portable)
-# - Delete My Tweets Setup 1.3.42.exe (installer)
+# - Delete My Tweets 1.3.43.exe (portable)
+# - Delete My Tweets Setup 1.3.43.exe (installer)
 ```
 
 ## Configuration
@@ -181,7 +181,7 @@ On first run (or if session expired after 24 hours):
 1. Browser opens to x.com
 2. Log in manually within 3 minutes
 3. App verifies you're logged into the correct account
-4. Session is saved per-account to `x_auth_<handle>.json`
+4. Session is saved per-account to `x_auth_<handle>.json` only after verification
 5. Future runs use saved session (until 24-hour expiry)
 
 ## Safety Features

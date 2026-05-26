@@ -2432,6 +2432,12 @@
         return;
       }
 
+      if (!isLoggedIn) {
+        showNotification(`Click Login to verify @${config.handle} before cleanup`, 'warn');
+        updateLoginButtonForAccount();
+        return;
+      }
+
       if (isRunning) {
         wasStopped = true;
         api.stopCleanup();

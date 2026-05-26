@@ -150,6 +150,11 @@ ipcMain.on('start-cleanup', async (event, config) => {
     return;
   }
 
+  if (!isSessionValidForHandle(normalizedHandle)) {
+    event.reply('cleanup-error', `Login verification required. Click Login and verify @${normalizedHandle} before cleanup.`);
+    return;
+  }
+
   isCleanupRunning = true;
   stopRequested = false;
   cleanupStats = { deleted: 0, protected: 0, skipped: 0, scanned: 0 };
@@ -325,6 +330,11 @@ ipcMain.on('run-in-terminal', async (event, config) => {
     return;
   }
 
+  if (!isSessionValidForHandle(normalizedHandle)) {
+    event.reply('terminal-error', `Login verification required. Click Login and verify @${normalizedHandle} before opening the CLI.`);
+    return;
+  }
+
   // Build environment variables for the CLI
   const env = buildCliEnv(config, normalizedHandle);
 
@@ -352,6 +362,7 @@ ipcMain.on('run-in-terminal', async (event, config) => {
 // Config storage - persist between sessions
 const fs = require('fs');
 const configPath = path.join(app.getPath('userData'), 'config.json');
+const SESSION_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 // ═══════════════════════════════════════════════════════════
 // LICENSE KEY VALIDATION
@@ -556,6 +567,144 @@ function getSessionPath(handle) {
   return path.join(app.getPath('userData'), `x_auth_${normalizedHandle}.json`);
 }
 
+function getSessionMetaPath(handle) {
+  const normalizedHandle = normalizeHandle(handle);
+  if (!normalizedHandle) return null;
+  return path.join(app.getPath('userData'), `x_auth_${normalizedHandle}.meta.json`);
+}
+
+function deleteSessionData(handle) {
+  const paths = [getSessionPath(handle), getSessionMetaPath(handle)];
+  for (const filePath of paths) {
+    try {
+      if (filePath && fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+    } catch (err) {
+      console.error('Error deleting session data:', err);
+    }
+  }
+}
+
+function saveSessionMeta(handle, verifiedHandle) {
+  const normalizedHandle = normalizeHandle(handle);
+  const metaPath = getSessionMetaPath(normalizedHandle);
+  if (!normalizedHandle || !metaPath) return;
+
+  fs.writeFileSync(metaPath, JSON.stringify({
+    handle: normalizedHandle,
+    verifiedHandle: normalizeHandle(verifiedHandle) || normalizedHandle,
+    verifiedAt: new Date().toISOString()
+  }, null, 2));
+}
+
+function isSessionFileCurrent(sessionPath) {
+  if (!sessionPath || !fs.existsSync(sessionPath)) return false;
+
+  try {
+    const age = Date.now() - fs.statSync(sessionPath).mtimeMs;
+    if (age > SESSION_EXPIRY_MS) {
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isSessionValidForHandle(handle) {
+  const normalizedHandle = normalizeHandle(handle);
+  if (!normalizedHandle) return false;
+
+  const sessionPath = getSessionPath(normalizedHandle);
+  const metaPath = getSessionMetaPath(normalizedHandle);
+
+  if (!isSessionFileCurrent(sessionPath)) {
+    deleteSessionData(normalizedHandle);
+    return false;
+  }
+
+  if (!metaPath || !fs.existsSync(metaPath)) {
+    return false;
+  }
+
+  try {
+    const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+    const verifiedAt = Date.parse(meta.verifiedAt);
+    const metaExpired = !Number.isFinite(verifiedAt) || Date.now() - verifiedAt > SESSION_EXPIRY_MS;
+    if (normalizeHandle(meta.handle) !== normalizedHandle || metaExpired) {
+      deleteSessionData(normalizedHandle);
+      return false;
+    }
+  } catch {
+    deleteSessionData(normalizedHandle);
+    return false;
+  }
+
+  return true;
+}
+
+async function getLoggedInHandle(page) {
+  const selectors = [
+    '[data-testid="SideNav_AccountSwitcher_Button"] [dir="ltr"] span',
+    '[data-testid="AccountSwitcher"] span[dir="ltr"]',
+    'nav [data-testid="AppTabBar_Profile_Link"]',
+    'a[href*="/"][data-testid="AppTabBar_Profile_Link"]'
+  ];
+
+  for (const selector of selectors) {
+    const locator = page.locator(selector);
+    const count = await locator.count().catch(() => 0);
+    if (count === 0) continue;
+
+    const text = await locator.first().innerText().catch(() => '');
+    const textMatch = text.match(/@([A-Za-z0-9_]{1,15})/);
+    if (textMatch) return textMatch[1].toLowerCase();
+
+    const href = await locator.first().getAttribute('href').catch(() => null);
+    const hrefMatch = href?.match(/^\/([A-Za-z0-9_]{1,15})$/);
+    if (hrefMatch) return hrefMatch[1].toLowerCase();
+  }
+
+  return null;
+}
+
+async function verifyLoginAccount(page, expectedHandle) {
+  const normalizedHandle = normalizeHandle(expectedHandle);
+  if (!normalizedHandle) {
+    return { ok: false, reason: 'invalid-handle' };
+  }
+
+  await page.goto(`https://x.com/${normalizedHandle}`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await page.waitForTimeout(3000);
+
+  const loggedInHandle = await getLoggedInHandle(page);
+  if (loggedInHandle && loggedInHandle !== normalizedHandle) {
+    return { ok: false, reason: 'wrong-account', loggedInHandle };
+  }
+
+  const editSelectors = [
+    '[data-testid="editProfileButton"]',
+    'a[href="/settings/profile"]',
+    'button:has-text("Edit profile")',
+    'a:has-text("Edit profile")',
+    '[aria-label="Edit profile"]'
+  ];
+
+  for (const selector of editSelectors) {
+    const count = await page.locator(selector).count().catch(() => 0);
+    if (count > 0) {
+      return { ok: true, loggedInHandle: loggedInHandle || normalizedHandle };
+    }
+  }
+
+  if (loggedInHandle === normalizedHandle) {
+    return { ok: true, loggedInHandle };
+  }
+
+  return { ok: false, reason: 'ownership-unconfirmed', loggedInHandle };
+}
+
 // Logout of X - clears session file and Edge cookies (no browser needed!)
 ipcMain.on('logout-x', async (event, handle) => {
   const normalizedHandle = normalizeHandle(handle);
@@ -566,11 +715,8 @@ ipcMain.on('logout-x', async (event, handle) => {
 
   try {
     // 1. Clear our session file
-    const sessionPath = getSessionPath(normalizedHandle);
-    if (sessionPath && fs.existsSync(sessionPath)) {
-      fs.unlinkSync(sessionPath);
-      console.log(`Cleared session file for @${normalizedHandle}`);
-    }
+    deleteSessionData(normalizedHandle);
+    console.log(`Cleared session data for @${normalizedHandle}`);
 
     // 2. Clear X cookies directly from Edge's SQLite database (no browser needed!)
     const userDataDir = process.env.EDGE_USER_DATA || path.join(process.env.LOCALAPPDATA || '', 'Microsoft', 'Edge', 'User Data');
@@ -618,8 +764,7 @@ ipcMain.on('check-session', (event, handle) => {
     event.reply('session-status', { hasSession: false });
     return;
   }
-  const sessionPath = getSessionPath(normalizedHandle);
-  const hasSession = fs.existsSync(sessionPath);
+  const hasSession = isSessionValidForHandle(normalizedHandle);
   event.reply('session-status', { hasSession, isFirstTime: !hasSession });
 
   // Show helpful message for first-time users
@@ -632,15 +777,8 @@ ipcMain.on('check-session', (event, handle) => {
 ipcMain.on('remove-account-session', (event, handle) => {
   const normalizedHandle = normalizeHandle(handle);
   if (!normalizedHandle) return;
-  const sessionPath = getSessionPath(normalizedHandle);
-  try {
-    if (fs.existsSync(sessionPath)) {
-      fs.unlinkSync(sessionPath);
-      console.log(`Removed session data for @${normalizedHandle}`);
-    }
-  } catch (err) {
-    console.error('Error removing session:', err);
-  }
+  deleteSessionData(normalizedHandle);
+  console.log(`Removed session data for @${normalizedHandle}`);
 });
 
 // Login to X - opens browser for manual login
@@ -708,15 +846,29 @@ ipcMain.on('login-x', async (event, handle) => {
     }
 
     if (loggedIn) {
+      const verifiedAccount = await verifyLoginAccount(page, normalizedHandle);
+      if (!verifiedAccount.ok) {
+        deleteSessionData(normalizedHandle);
+        if (browser) await browser.close();
+        else await context.close();
+
+        const message = verifiedAccount.reason === 'wrong-account' && verifiedAccount.loggedInHandle
+          ? `Wrong X account. Browser is logged in as @${verifiedAccount.loggedInHandle}, not @${normalizedHandle}.`
+          : `Could not confirm this browser is logged in as @${normalizedHandle}.`;
+        event.reply('login-x-result', { success: false, message });
+        return;
+      }
+
       // Save session to userData folder (consistent with getSessionPath)
       const sessionPath = getSessionPath(normalizedHandle);
       await context.storageState({ path: sessionPath });
+      saveSessionMeta(normalizedHandle, verifiedAccount.loggedInHandle);
       console.log(`Session saved to: ${sessionPath}`);
 
       if (browser) await browser.close();
       else await context.close();
 
-      event.reply('login-x-result', { success: true, message: `Logged in as @${normalizedHandle}!` });
+      event.reply('login-x-result', { success: true, message: `Verified login as @${normalizedHandle}!` });
     } else {
       if (browser) await browser.close();
       else await context.close();
